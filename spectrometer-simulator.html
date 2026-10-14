@@ -1,0 +1,2424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>成像光谱仪模拟器 · 双透镜反射式平面光栅 · 水平入射光路视图</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#161c24; --panel2:#1c242e; --line:#2a3441;
+    --fg:#e6edf3; --fg2:#9fb0c0; --accent:#4db8ff; --warn:#ffb454; --bad:#ff6b6b; --ok:#63d68f;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--fg);font:14px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .sub{color:var(--fg2);font-size:12px}
+  #wrap{display:flex;height:calc(100% - 47px);min-height:0}
+  #stage{flex:1;position:relative;min-width:0}
+  canvas{display:block;width:100%;height:100%}
+  #side{width:420px;flex:none;border-left:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:10px 12px 60px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg2);margin:14px 0 6px;font-weight:600;border-bottom:1px solid var(--line);padding-bottom:4px}
+  h2:first-child{margin-top:2px}
+  .ctl{margin-bottom:9px}
+  .ctl .row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:2px}
+  .ctl label{font-size:12px;color:var(--fg)}
+  .ctl input[type=range]{width:100%;height:16px;margin:0;accent-color:var(--accent)}
+  .ctl input[type=number]{width:104px;background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+     border-radius:5px;padding:2px 6px;font:inherit;font-size:12px;text-align:right}
+  .ctl input[type=number]:disabled{opacity:.45}
+  .ctl .unit{color:var(--fg2);font-size:11px;margin-left:4px}
+  .grp{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 9px;margin:8px 0;font-size:12px}
+  .grp label{display:block;margin:3px 0}
+  .state{padding:6px 9px;border-radius:6px;background:rgba(77,184,255,.10);border:1px solid rgba(77,184,255,.35);font-size:12px;margin-bottom:6px}
+  .state.error{background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.45);color:#ffc9c9}
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  td{padding:2px 0;vertical-align:top}
+  td.k{color:var(--fg2);white-space:normal;padding-right:8px;width:56%}
+  td.v{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+  td.f{color:#8fa3b6;font-family:Consolas,"Cascadia Mono",monospace;font-size:10.5px;padding:0 0 5px 0;word-break:break-word}
+  /* ---- panel toolbar: key-results / full-detail switch ---- */
+  #panelbar{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+     background:var(--panel);border-bottom:1px solid var(--line);padding:6px 0 8px;margin:0 0 8px}
+  #panelbar .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  #panelbar .seg button{background:transparent;border:0;color:var(--fg2);font:inherit;font-size:11.5px;
+     padding:3px 10px;cursor:pointer}
+  #panelbar .seg button.on{background:rgba(77,184,255,.16);color:var(--fg);font-weight:600}
+  #panelbar .hint{color:var(--fg2);font-size:11px}
+  #panelbar .chip{color:var(--fg2);font-size:11px;border:1px solid var(--line);border-radius:10px;padding:1px 8px}
+  #side{font-size:12.5px}
+
+  /* Formulas and derivations belong to the DETAIL view. */
+  #side[data-mode="summary"] td.f{display:none}
+  #side[data-mode="summary"] #panelbar .hint{display:inline}
+  /* The mode is chosen in JS: summary by default, and on a narrow window summary is forced
+     unless the user explicitly asks for the formulas. CSS only honours data-mode, so a single
+     attribute drives the whole panel consistently. */
+  @media (max-width: 1100px) {
+    #side{width:min(420px,46vw)}
+  }
+  @media (max-width: 780px) {
+    #wrap{flex-direction:column}
+    #stage{height:52%;min-height:240px}
+    #side{width:100%;border-left:0;border-top:1px solid var(--line);flex:1}
+    header h1{font-size:15px}
+    header .sub{font-size:11px}
+  }
+  td .u{color:var(--fg2);font-weight:400;font-size:10.5px}
+  tr.err td{color:#ffc9c9}
+  tr.warn td{color:#ffd9a3}
+  #overlay{position:absolute;left:10px;top:8px;font-size:11px;color:var(--fg2);
+     background:rgba(15,20,25,.78);border:1px solid var(--line);border-radius:6px;padding:6px 9px;
+     font-family:Consolas,monospace;pointer-events:none;line-height:1.5;white-space:pre}
+  .footnote{color:var(--fg2);font-size:11px;margin:6px 0 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>成像光谱仪模拟器</h1>
+  <span class="sub" id="subtitle">双透镜反射式平面光栅光谱仪 · 二维色散平面逐面追迹 · 真实有限口径渐晕 · 公式与代入可现场验算</span>
+</header>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="overlay"></div>
+    <!-- #inset (focal-plane view) is created by app.js and drawn from the same solved snapshot -->
+  </div>
+  <div id="side">
+    <div class="grp">
+      <label><input type="radio" name="apertureMode" id="modeReal" checked> 真实实物口径（光栅 25 mm、两镜 25.4 mm，会出现真实渐晕）</label>
+      <label><input type="radio" name="apertureMode" id="modeIdeal"> 理想不限口径（研究用，非真实仪器结果）</label>
+    </div>
+    <div class="grp">
+      <label><input type="radio" name="constraint" id="constraintFixedN" checked> 固定 N（默认）：改 G/λ0 时重解 α、β 与机构方向</label>
+      <label><input type="radio" name="constraint" id="constraintFixedAlpha"> 固定 α（研究）：按光栅方程反求 N（提示需更换光栅）</label>
+      <label style="margin-top:2px">锁定入射角 α（研究模式）：<input type="number" id="alphaRef" step="0.0001" value="72.4412526684" style="width:120px"></label>
+    </div>
+
+    <h2>光学参数</h2>
+    <div id="controls"></div>
+
+    <h2>显示</h2>
+    <div class="grp">
+      <label><input type="checkbox" id="showChief" checked> 主光线</label>
+      <label><input type="checkbox" id="showAperture" checked> 孔径采样光线</label>
+      <label><input type="checkbox" id="showEdge" checked> 狭缝边缘光线</label>
+      <label><input type="checkbox" id="showAxis" checked> 光轴</label>
+      <label><input type="checkbox" id="showLabels" checked> 标注</label>
+    </div>
+
+    <div id="panelbar">
+      <span class="hint">显示</span>
+      <span class="seg">
+        <button type="button" id="modeSummary" title="只显示关键指标结果">关键结果</button>
+        <button type="button" id="modeDetail" title="展开公式、代入过程与说明">展开公式</button>
+      </span>
+      <span class="chip" id="modeChip"></span>
+    </div>
+    <div id="panels"></div>
+    <p class="footnote">二维色散平面理想薄透镜模型：不含镜头像差、光栅效率、偏振、真实 LSF 与空间向（z）渐晕。真实口径下的光线丢失是物理渐晕，不是错误。</p>
+  </div>
+</div>
+<script>
+/* ===== src/core/constants.js ===== */
+/* SoL'Ex 2D dispersion-plane model -- shared constants, status codes and tolerances.
+ * Source of truth: docs/PHYSICS-SoLEx二维光学模型-v1.md and docs/SPEC-SoLEx光谱仪模拟器-v3.md
+ * Units: length mm, wavelength mm inside the physics, angles rad (deg only at the UI edge).
+ * Dual-target: registers on globalThis.SoLExCore so the same file runs in Node tests and,
+ * after inlining, in the browser. No DOM, no Canvas, no network, no dependencies. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+
+  C.VERSION = 'core-1.0.0';
+
+  /** Physical constants and frozen nominal hardware values. */
+  C.CONST = {
+    NM_TO_MM: 1e-6,          // lambda_mm = lambda_nm * 1e-6
+    D2R: Math.PI / 180,
+    R2D: 180 / Math.PI,
+    M_ORDER: 1,              // diffraction order, fixed for v1
+    SLIT_HEIGHT_MM: 4.5,     // h, out-of-plane (z) spatial direction
+    GRATING_W_DEFAULT_MM: 25,   // real grating dispersion-plane width  Wg
+    GRATING_H_DEFAULT_MM: 25,   // real grating spatial height         Hg
+    LENS_DIAMETER_DEFAULT_MM: 25.4, // nominal clear aperture of each transmission lens
+    PIXEL_UM_DEFAULT: 2.4,   // sensor pixel, sampling demo only
+    LC_DEFAULT_MM: 80,       // example layout, NOT an official mechanical measurement
+    LO_DEFAULT_MM: 60,       // example layout, NOT an official mechanical measurement
+    N_MIN: 100, N_MAX: 3600,
+    FC_MIN: 20, FC_MAX: 300,
+    FO_MIN: 20, FO_MAX: 400,
+    D_MIN: 1, D_MAX: 40,
+    G_MIN_DEG: 5, G_MAX_DEG: 60,
+    W_MIN_UM: 0.5, W_MAX_UM: 200,
+    LAM_MIN_NM: 200, LAM_MAX_NM: 1100,
+    DLAM_MIN_NM: 0, DLAM_MAX_NM: 40,
+    NRAY_MIN: 1, NRAY_MAX: 51,
+    LC_MIN_MM: 1, LC_MAX_MM: 400,
+    LO_MIN_MM: 1, LO_MAX_MM: 400,
+  };
+
+  /** Frozen default input (BASELINE-SoLEx数值基准-v3.csv / SPEC v3 section 3). */
+  C.DEFAULT_INPUT = {
+    fc: 80, fo: 125, D: 10, N: 2400, G_deg: 34, w_um: 10, lam0_nm: 656.3, dlam_nm: 10,
+    nRay: 9, h: 4.5, m: 1, pixel_um: 2.4,
+    Wg: 25, Hg: 25, D_collimator: 25.4, D_camera: 25.4,
+    Lc: 80, Lo: 60,
+    mode: 'real',            // 'real' (real apertures, vignetting possible) | 'ideal'
+    constraint: 'fixedN',    // 'fixedN' (default) | 'fixedAlpha' (research lock)
+    alphaRef_deg: null,      // used only by fixedAlpha; null => derived from fc/fo/G/lam0 defaults
+    show: { chief: true, aperture: true, edge: true, normals: false, labels: true },
+  };
+
+  /** Ray / design status vocabulary (SPEC v3 section 4.5 and HANDOFF section 7). */
+  C.STATUS = {
+    VALID: 'VALID',
+    CLIPPED_COLLIMATOR: 'CLIPPED_COLLIMATOR',
+    CLIPPED_GRATING: 'CLIPPED_GRATING',
+    CLIPPED_CAMERA: 'CLIPPED_CAMERA',
+    NO_REAL_SOLUTION: 'NO_REAL_SOLUTION',
+    BACKSIDE_OR_GRAZING: 'BACKSIDE_OR_GRAZING',
+    NO_PROPAGATING_ORDER: 'NO_PROPAGATING_ORDER',
+    REJECT_BACKWARD_INTERSECTION: 'REJECT_BACKWARD_INTERSECTION',
+    NO_GRATING_INTERSECTION: 'NO_GRATING_INTERSECTION',
+    BLOCKED: 'BLOCKED',
+    DEGENERATE_COLLIMATOR: 'DEGENERATE_COLLIMATOR',
+  };
+
+  /** Sign conventions used to solve sin(alpha - G/2) = m*N*lambda/(2 cos(G/2)). */
+  C.ALPHA_BRANCH = { FRONT: 'FRONT', BACK: 'BACK' };
+
+  /** Acceptance tolerances (SPEC v3 section 7.1). */
+  C.TOL = {
+    ORTHOGONAL: 1e-12,
+    GRATING_LAW: 1e-10,
+    CHIEF_CENTRE_MM: 1e-8,
+    PLANE_MM: 1e-8,
+    FOCUS_MM: 1e-7,
+    IMAGE_WIDTH_REL: 1e-3,   // 0.1 %
+    ANGLE_DEG: 1e-8,
+  };
+
+  /** Cross-normal (beta < 0) is a valid branch but leaves the default same-side geometry. */
+  C.WARNING_CODES = { CROSS_NORMAL: 'CROSS_NORMAL', RESEARCH_N: 'RESEARCH_N', IDEAL_APERTURE: 'IDEAL_APERTURE' };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/core/vec2.js ===== */
+/* Minimal 2D vector helpers for the dispersion plane. Pure functions, no allocation tricks. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+
+  function v(x, y) { return { x: x, y: y }; }
+  function add(a, b) { return { x: a.x + b.x, y: a.y + b.y }; }
+  function sub(a, b) { return { x: a.x - b.x, y: a.y - b.y }; }
+  function mul(a, k) { return { x: a.x * k, y: a.y * k }; }
+  function dot(a, b) { return a.x * b.x + a.y * b.y; }
+  function cross(a, b) { return a.x * b.y - a.y * b.x; }
+  function len(a) { return Math.hypot(a.x, a.y); }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function perp(a) { return { x: -a.y, y: a.x }; }
+  function norm(a) { var L = len(a); return L > 0 ? { x: a.x / L, y: a.y / L } : { x: NaN, y: NaN }; }
+  function angleOf(a) { return Math.atan2(a.y, a.x); }
+  function fromAngle(t, r) { r = r === undefined ? 1 : r; return { x: Math.cos(t) * r, y: Math.sin(t) * r }; }
+  function finite(a) { return a && Number.isFinite(a.x) && Number.isFinite(a.y); }
+  function eq(a) { return { x: a.x, y: a.y }; }
+  function fmt(a, n) { n = n === undefined ? 6 : n; return '(' + a.x.toFixed(n) + ', ' + a.y.toFixed(n) + ')'; }
+
+  /**
+   * Intersect ray P + t*D (t > 0) with the line through O with unit normal N.
+   * Returns { t, point } or null when parallel or behind.
+   */
+  function rayPlane(P, D, O, N) {
+    var den = dot(D, N);
+    if (Math.abs(den) < 1e-15) return null;
+    var t = dot(sub(O, P), N) / den;
+    if (!(t > 0)) return { t: t, point: add(P, mul(D, t)), behind: true };
+    return { t: t, point: add(P, mul(D, t)), behind: false };
+  }
+
+  /** Signed algebraic distance from point X to the plane through O with unit normal N. */
+  function planeResidual(X, O, N) { return dot(sub(X, O), N); }
+
+  /** Transverse coordinate of X along unit direction T. */
+  function transverse(X, O, T) { return dot(sub(X, O), T); }
+
+  C.vec = {
+    v: v, add: add, sub: sub, mul: mul, dot: dot, cross: cross, len: len, dist: dist,
+    perp: perp, norm: norm, angleOf: angleOf, fromAngle: fromAngle, finite: finite, eq: eq, fmt: fmt,
+    rayPlane: rayPlane, planeResidual: planeResidual, transverse: transverse,
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/core/validate.js ===== */
+/* Input validation and normalisation. Everything the solver consumes goes through here.
+ * Rejects rather than clamps: silent clamping is explicitly forbidden by AGENTS.md section 2.
+ * Returns either { ok: true, input } or { ok: false, errors: [{ field, message }] }. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+
+  function num(raw, field, errors, lo, hi, required) {
+    if (raw === undefined || raw === null || raw === '') {
+      if (required) errors.push({ field: field, message: 'missing value' });
+      return undefined;
+    }
+    var v = typeof raw === 'number' ? raw : Number(String(raw).trim());
+    if (!Number.isFinite(v)) { errors.push({ field: field, message: 'not a finite number: ' + JSON.stringify(raw) }); return undefined; }
+    if (lo !== undefined && v < lo) { errors.push({ field: field, message: 'below minimum ' + lo + ' (got ' + v + ')' }); return undefined; }
+    if (hi !== undefined && v > hi) { errors.push({ field: field, message: 'above maximum ' + hi + ' (got ' + v + ')' }); return undefined; }
+    return v;
+  }
+
+  /**
+   * Validate and normalise a raw UI/JSON input object.
+   * Wavelengths stay in nm, slit width in um, angles in deg; the solver converts to mm/rad.
+   */
+  function parseAndValidateInput(raw) {
+    var errors = [];
+    var src = raw || {};
+    var D = C.DEFAULT_INPUT;
+    var pick = function (k) { return src[k] === undefined ? D[k] : src[k]; };
+    var K = C.CONST;
+
+    var input = {
+      fc: num(pick('fc'), 'fc', errors, K.FC_MIN, K.FC_MAX, true),
+      fo: num(pick('fo'), 'fo', errors, K.FO_MIN, K.FO_MAX, true),
+      D: num(pick('D'), 'D', errors, K.D_MIN, K.D_MAX, true),
+      w_um: num(pick('w_um'), 'w_um', errors, K.W_MIN_UM, K.W_MAX_UM, true),
+      lam0_nm: num(pick('lam0_nm'), 'lam0_nm', errors, K.LAM_MIN_NM, K.LAM_MAX_NM, true),
+      dlam_nm: num(pick('dlam_nm'), 'dlam_nm', errors, K.DLAM_MIN_NM, K.DLAM_MAX_NM, true),
+      G_deg: num(pick('G_deg'), 'G_deg', errors, K.G_MIN_DEG, K.G_MAX_DEG, true),
+      nRay: num(pick('nRay'), 'nRay', errors, K.NRAY_MIN, K.NRAY_MAX, true),
+      h: num(pick('h'), 'h', errors, 0.1, 50, true),
+      m: num(pick('m'), 'm', errors, 1, 3, true),
+      pixel_um: num(pick('pixel_um'), 'pixel_um', errors, 0.1, 50, false),
+      Wg: num(pick('Wg'), 'Wg', errors, 1, 500, true),
+      Hg: num(pick('Hg'), 'Hg', errors, 1, 500, true),
+      D_collimator: num(pick('D_collimator'), 'D_collimator', errors, 1, 500, true),
+      D_camera: num(pick('D_camera'), 'D_camera', errors, 1, 500, true),
+      Lc: num(pick('Lc'), 'Lc', errors, K.LC_MIN_MM, K.LC_MAX_MM, true),
+      Lo: num(pick('Lo'), 'Lo', errors, K.LO_MIN_MM, K.LO_MAX_MM, true),
+      alphaRef_deg: num(pick('alphaRef_deg'), 'alphaRef_deg', errors, 0.001, 89.999, false),
+    };
+
+    input.mode = src.mode === undefined ? D.mode : String(src.mode);
+    if (input.mode !== 'real' && input.mode !== 'ideal') {
+      errors.push({ field: 'mode', message: 'must be real or ideal (got ' + input.mode + ')' });
+    }
+    var constraint = src.constraint === undefined ? D.constraint : String(src.constraint);
+    if (constraint !== 'fixedN' && constraint !== 'fixedAlpha') {
+      errors.push({ field: 'constraint', message: 'must be fixedN or fixedAlpha (got ' + constraint + ')' });
+    }
+    input.constraint = constraint;
+
+    // N is mandatory for fixedN, ignored (recomputed) for fixedAlpha.
+    if (constraint === 'fixedN') {
+      input.N = num(pick('N'), 'N', errors, K.N_MIN, K.N_MAX, true);
+    } else {
+      input.N = null;
+    }
+    if (constraint === 'fixedAlpha' && input.alphaRef_deg === undefined) {
+      // fall back to the design incidence of the default configuration (documented default)
+      input.alphaRef_deg = 72.44125266837229;
+    }
+
+    // Odd ray count keeps a central chief ray.
+    if (input.nRay !== undefined) {
+      input.nRay = Math.round(input.nRay);
+      if (input.nRay % 2 === 0) input.nRay = input.nRay + 1;
+      if (input.nRay > K.NRAY_MAX) input.nRay = K.NRAY_MAX;
+      if (input.nRay < 1) input.nRay = 1;
+    }
+
+    input.show = Object.assign({}, D.show, (src.show || {}));
+
+    if (errors.length) return { ok: false, errors: errors };
+    return { ok: true, input: input };
+  }
+
+  C.parseAndValidateInput = parseAndValidateInput;
+  C.validate = { parseAndValidateInput: parseAndValidateInput };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/core/design.js ===== */
+/* Design solve: the ONE place where alpha, beta and the effective N come from.
+ * Implements PHYSICS v1 sections 3 and 4. Produces an immutable Solved snapshot that every
+ * later stage (geometry, trace, metrics, panels, canvas) must read instead of raw UI state. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+  var V = C.vec;
+
+  function deg2rad(d) { return d * C.CONST.D2R; }
+  function rad2deg(r) { return r * C.CONST.R2D; }
+  function clampUnit(x) { return Math.min(1, Math.max(-1, x)); }
+
+  /**
+   * Solve sin(alpha - G/2) = m*N*lam/(2 cos(G/2)) on the physical front branch 0 < alpha < 90 deg.
+   * branch 'FRONT' takes +asin (the only branch that can satisfy alpha < 90 deg here).
+   */
+  function solveDesignAngles(lambdaMm, N, G, m, branch) {
+    var errors = [];
+    var halfG = G / 2;
+    var denom = 2 * Math.cos(halfG);
+    var s = (m * N * lambdaMm) / denom;
+    if (!Number.isFinite(s)) return { ok: false, s: s, errors: [{ code: C.STATUS.NO_REAL_SOLUTION, message: 'non-finite grating argument' }] };
+    if (Math.abs(s) > 1) {
+      return {
+        ok: false, s: s,
+        errors: [{ code: C.STATUS.NO_REAL_SOLUTION, message: '|m*N*lambda/(2cos(G/2))| = ' + Math.abs(s).toPrecision(6) + ' > 1' }],
+      };
+    }
+    var asin = Math.asin(s);
+    var alpha = (branch === C.ALPHA_BRANCH.BACK) ? Math.PI - halfG - asin : halfG + asin;
+    var beta = alpha - G;
+    if (!Number.isFinite(alpha) || !Number.isFinite(beta)) {
+      return { ok: false, s: s, errors: [{ code: C.STATUS.NO_REAL_SOLUTION, message: 'non-finite design angles' }] };
+    }
+    if (!(alpha > 0 && alpha < Math.PI / 2)) {
+      errors.push({ code: C.STATUS.BACKSIDE_OR_GRAZING, message: 'alpha = ' + rad2deg(alpha).toFixed(6) + ' deg is outside the physical front side (0, 90) deg' });
+    }
+    if (!(beta > -Math.PI / 2 && beta < Math.PI / 2)) {
+      errors.push({ code: C.STATUS.BACKSIDE_OR_GRAZING, message: 'beta = ' + rad2deg(beta).toFixed(6) + ' deg is outside (-90, 90) deg' });
+    }
+    if (errors.length) return { ok: false, alpha: alpha, beta: beta, s: s, errors: errors };
+    return { ok: true, alpha: alpha, beta: beta, s: s, errors: [] };
+  }
+
+  /** Fixed-G design limit (alpha -> 90 deg): lambda_design_max = (1+cosG)/(mN). */
+  function designLimitMm(G, N, m) { return (1 + Math.cos(G)) / (m * N); }
+  /** Algebraic asin domain limit: lambda_asin_max = 2cos(G/2)/(mN). Not a physical branch limit. */
+  function asinLimitMm(G, N, m) { return 2 * Math.cos(G / 2) / (m * N); }
+  /** Propagation limit with a FIXED alpha (red side): lambda_order_max = (1+sin alpha)/(mN). */
+  function orderLimitMm(alpha, N, m) { return (1 + Math.sin(alpha)) / (m * N); }
+
+  /** Required groove density when the incidence angle is locked (research mode). */
+  function requiredN(alphaRef, G, lambdaMm, m) {
+    return (Math.sin(alphaRef) + Math.sin(alphaRef - G)) / (m * lambdaMm);
+  }
+
+  /** Diffraction angle for any wavelength with the mechanism FIXED (alpha does not move). */
+  function diffract(lambdaMm, N, alpha, m) {
+    var uy = m * N * lambdaMm - Math.sin(alpha);
+    if (!Number.isFinite(uy) || Math.abs(uy) >= 1) {
+      return { ok: false, uy: uy, errors: [{ code: C.STATUS.NO_PROPAGATING_ORDER, message: '|m*N*lambda - sin(alpha)| = ' + Math.abs(uy).toPrecision(6) + ' >= 1' }] };
+    }
+    return { ok: true, beta: Math.asin(uy), uy: uy, errors: [] };
+  }
+
+  /**
+   * Full design solve. input must already be validated (parseAndValidateInput ok result).
+   * Returns { ok: true, solved } or { ok: false, status, errors }.
+   */
+  function solveDesign(input) {
+    var m = input.m;
+    var lambda0 = input.lam0_nm * C.CONST.NM_TO_MM;
+    var G = deg2rad(input.G_deg);
+    var alpha, beta, N;
+    var errors = [], warnings = [];
+
+    if (input.constraint === 'fixedAlpha') {
+      alpha = deg2rad(input.alphaRef_deg);
+      N = requiredN(alpha, G, lambda0, m);
+      if (!Number.isFinite(N) || N <= 0) {
+        return { ok: false, status: C.STATUS.NO_REAL_SOLUTION, errors: [{ code: C.STATUS.NO_REAL_SOLUTION, message: 'required N is not positive/real' }] };
+      }
+      beta = alpha - G;
+      if (!(alpha > 0 && alpha < Math.PI / 2)) errors.push({ code: C.STATUS.BACKSIDE_OR_GRAZING, message: 'locked alpha is outside (0, 90) deg' });
+      if (!(beta > -Math.PI / 2 && beta < Math.PI / 2)) errors.push({ code: C.STATUS.BACKSIDE_OR_GRAZING, message: 'beta is outside (-90, 90) deg' });
+      warnings.push({
+        code: C.WARNING_CODES.RESEARCH_N,
+        message: 'fixedAlpha research mode: the grating would have to be replaced (N = ' + N.toFixed(6) + ' lines/mm) -- this is not the physical grating density',
+      });
+      if (errors.length) return { ok: false, status: C.STATUS.BACKSIDE_OR_GRAZING, errors: errors };
+    } else {
+      N = input.N;
+      var sol = solveDesignAngles(lambda0, N, G, m, C.ALPHA_BRANCH.FRONT);
+      if (!sol.ok) {
+        var status = C.STATUS.NO_REAL_SOLUTION;
+        for (var e = 0; e < sol.errors.length; e++) if (sol.errors[e].code === C.STATUS.BACKSIDE_OR_GRAZING) status = C.STATUS.BACKSIDE_OR_GRAZING;
+        return { ok: false, status: status, errors: sol.errors, s: sol.s };
+      }
+      alpha = sol.alpha;
+      beta = sol.beta;
+    }
+
+    var i = { x: Math.cos(alpha), y: Math.sin(alpha) };
+    var uc = { x: -i.x, y: -i.y };
+    var tc = { x: -Math.sin(alpha), y: Math.cos(alpha) };
+    var W = { x: -Math.cos(beta), y: -Math.sin(beta) };
+    var to = { x: -W.y, y: W.x };           // = (sin beta, -cos beta)
+    var tg = { x: 0, y: 1 };
+    var ng = { x: -1, y: 0 };
+
+    var lawLeft = Math.sin(alpha) + Math.sin(beta);
+    var lawRight = m * N * lambda0;
+    var armAngleG = Math.acos(clampUnit(V.dot(uc, W)));
+    var propagationAngle = Math.acos(clampUnit(V.dot(i, W)));
+
+    var bands = [];
+    var bandLams = [input.lam0_nm - input.dlam_nm, input.lam0_nm, input.lam0_nm + input.dlam_nm];
+    for (var b = 0; b < 3; b++) {
+      var lamNm = bandLams[b];
+      if (!(lamNm > 0)) {
+        bands.push({ lam_nm: lamNm, index: b, isDesign: b === 1, ok: false, errors: [{ code: C.STATUS.NO_PROPAGATING_ORDER, message: 'non-positive wavelength' }] });
+        continue;
+      }
+      var lamMm = lamNm * C.CONST.NM_TO_MM;
+      var d = diffract(lamMm, N, alpha, m);
+      if (!d.ok) {
+        bands.push({ lam_nm: lamNm, lam_mm: lamMm, index: b, isDesign: b === 1, ok: false, errors: d.errors });
+        continue;
+      }
+      bands.push({
+        lam_nm: lamNm, lam_mm: lamMm, index: b, isDesign: b === 1, ok: true,
+        beta: d.beta, beta_deg: rad2deg(d.beta), uy: d.uy,
+        W: { x: -Math.cos(d.beta), y: -Math.sin(d.beta) },
+        crossNormal: d.beta < 0,
+        x_focal: input.fo * Math.tan(d.beta - beta),
+      });
+    }
+
+    var solved = {
+      fc: input.fc, fo: input.fo, D: input.D, w_mm: input.w_um / 1000, h: input.h, m: m,
+      lam0_nm: input.lam0_nm, lam0_mm: lambda0, dlam_nm: input.dlam_nm, nRay: input.nRay,
+      pixel_um: input.pixel_um, Lc: input.Lc, Lo: input.Lo, mode: input.mode, constraint: input.constraint,
+      Wg: input.Wg, Hg: input.Hg, D_collimator: input.D_collimator, D_camera: input.D_camera,
+      N: N,
+      N_nominal: input.constraint === 'fixedN' ? input.N : null,
+      alpha: alpha, beta: beta, G: G, halfG: G / 2,
+      alpha_deg: rad2deg(alpha), beta_deg: rad2deg(beta), G_deg: rad2deg(G),
+      i: i, uc: uc, tc: tc, W: W, to: to, tg: tg, ng: ng,
+      lawLeft: lawLeft, lawRight: lawRight, lawResidual: lawLeft - lawRight,
+      armAngleG: armAngleG, propagationAngle: propagationAngle,
+      // Frozen definition (SPEC v3 section 0.2, BASELINE csv row 'anamorphic A'):
+      //     A = cos(alpha)/cos(beta) = 0.385170825111
+      // The diffracted beam WIDENS by 1/A and the slit image is reduced by A, which is exactly the
+      // official SoL'Ex statement (10 um slit -> 3.86 um image) and what the frozen 6.018294 um needs.
+      anamorphicFactor: Math.cos(alpha) / Math.cos(beta),
+      // Same numeric value as A, kept under a second name because callers must state WHICH object
+      // they mean: the slit image SHRINKS by A, the beam WIDENS by 1/A = 2.596250637.
+      // (Earlier comment here said "1/A", which was a typo; the value never changed.)
+      beamWidthRatio: Math.cos(alpha) / Math.cos(beta),
+      lambdaDesignMax_nm: designLimitMm(G, N, m) / C.CONST.NM_TO_MM,
+      lambdaAsinMax_nm: asinLimitMm(G, N, m) / C.CONST.NM_TO_MM,
+      lambdaOrderMax_nm: orderLimitMm(alpha, N, m) / C.CONST.NM_TO_MM,
+      bands: bands,
+      warnings: warnings,
+      status: C.STATUS.VALID,
+    };
+    // Freeze the snapshot: later stages must not be able to mutate it in place.
+    deepFreeze(solved);
+    return { ok: true, solved: solved };
+  }
+
+  function deepFreeze(o) {
+    Object.getOwnPropertyNames(o).forEach(function (k) {
+      var v = o[k];
+      if (v && typeof v === 'object' && !Object.isFrozen(v)) deepFreeze(v);
+    });
+    return Object.freeze(o);
+  }
+
+  C.solveDesign = solveDesign;
+  C.deepFreeze = deepFreeze;
+  C.design = {
+    solveDesign: solveDesign,
+    solveDesignAngles: solveDesignAngles,
+    diffract: diffract,
+    requiredN: requiredN,
+    designLimitMm: designLimitMm,
+    asinLimitMm: asinLimitMm,
+    orderLimitMm: orderLimitMm,
+    deg2rad: deg2rad,
+    rad2deg: rad2deg,
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/core/geometry.js ===== */
+/* Mechanism geometry from a Solved snapshot (PHYSICS v1 section 2).
+ * All planes are defined in the world frame and never rotated for display.
+ *   grating    : x = 0
+ *   collimator : (X - C) . i = 0
+ *   camera     : (X - M) . W = 0
+ *   detector   : (X - F) . W = 0
+ * Layout distances Lc/Lo are independent of the focal lengths fc/fo (the legacy code conflated
+ * them; the defaults 80/60 are an example layout, NOT official mechanical measurements). */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+  var V = C.vec;
+
+  /** Half-aperture in the dispersion plane, or null for an ideal (uncropped) element. */
+  function halfAperture(realMode, value) { return realMode ? value / 2 : null; }
+
+  function buildGeometry(solved, layout) {
+    var Lc = layout && layout.Lc !== undefined ? layout.Lc : solved.Lc;
+    var Lo = layout && layout.Lo !== undefined ? layout.Lo : solved.Lo;
+    var ideal = solved.mode === 'ideal';
+    var real = !ideal;
+
+    var i = solved.i, W = solved.W;
+    var P = { x: 0, y: 0 };
+    var Cc = V.mul(i, -Lc);                       // collimator centre
+    var S0 = V.add(Cc, V.mul(i, -solved.fc));     // entrance slit centre (front focal plane)
+    var M = V.mul(W, Lo);                         // camera lens centre
+    var F = V.add(M, V.mul(W, solved.fo));        // detector plane centre
+
+    // Real apertures: grating Wg in the dispersion plane, nominal lens diameters.
+    var gratingHalf = halfAperture(real, solved.Wg);
+    var collimatorHalf = halfAperture(real, solved.D_collimator);
+    var cameraHalf = halfAperture(real, solved.D_camera);
+
+    // Axis-approximate throughput of the design wavelength (PHYSICS v1 section 6).
+    var footprint = solved.D / Math.cos(solved.alpha);      // illuminated grating width if unlimited
+    var deff = ideal
+      ? solved.D
+      : Math.min(solved.D, solved.D_collimator, solved.Wg * Math.cos(solved.alpha));
+    var willum = deff / Math.cos(solved.alpha);
+    var dout = deff / solved.anamorphicFactor;   // D_out = D_eff * cos(beta)/cos(alpha), same as D_eff/solved.A
+
+    var geometry = {
+      P: P, C: Cc, S0: S0, M: M, F: F,
+      Lc: Lc, Lo: Lo, fc: solved.fc, fo: solved.fo,
+      // planes: point + unit normal (grating plane handled by its own tangent/normal below)
+      planes: {
+        grating: { point: P, normal: solved.ng, tangent: solved.tg },
+        collimator: { point: Cc, normal: i, tangent: solved.tc },
+        camera: { point: M, normal: W, tangent: solved.to },
+        detector: { point: F, normal: W, tangent: solved.to },
+      },
+      apertures: {
+        mode: solved.mode,
+        gratingHalfWidth: gratingHalf,          // dispersion-plane half width (null = ideal)
+        collimatorHalf: collimatorHalf,
+        cameraHalf: cameraHalf,
+        gratingWg: real ? solved.Wg : null,
+        gratingHg: real ? solved.Hg : null,
+        collimatorDia: real ? solved.D_collimator : null,
+        cameraDia: real ? solved.D_camera : null,
+      },
+      // axis-approximate beam budget (modal display, not a per-ray clipping decision)
+      beam: {
+        D: solved.D, footprint: footprint, D_eff: deff, W_illuminated: willum, D_out: dout,
+        anamorphic: solved.anamorphicFactor,     // SPEC v3: A = cos(alpha)/cos(beta)
+        fNumberEffective: solved.fc / deff,
+        requiredGratingWidth: footprint,          // if the grating were unlimited
+        requiredCameraDiameter: dout,             // central-wavelength, on-axis, order of magnitude
+        truncated: real && (footprint > solved.Wg * 1.0000001),
+      },
+      axis: [S0, Cc, P, M, F],                    // chief-axis polyline for drawing/checks
+    };
+    return geometry;
+  }
+
+  C.buildGeometry = buildGeometry;
+  C.geometry = { buildGeometry: buildGeometry };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/core/trace.js ===== */
+/* Flat per-surface ray trace (PHYSICS v1 section 5) plus honest finite-aperture clipping.
+ *
+ * Contract:
+ *  - one slit point S per (s), shared by every aperture sample zeta;
+ *  - every intersection is solved from the real element plane equation;
+ *  - the FIRST real aperture that is exceeded ends the physical ray (CLIPPED_*),
+ *    and visibleSegments never passes that point;
+ *  - an aperture-less ideal mode (mode: 'ideal') is clearly reported and never presented
+ *    as a real-instrument result.
+ *
+ * The downstream camera-lens direction is always taken from the Solved band angle, so the trace
+ * can never disagree with the design/metrics snapshot (defect BUG-01). */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+  var V = C.vec;
+  var S = C.STATUS;
+
+  function vec(a) { return { x: a.x, y: a.y }; }
+
+  /**
+   * traceRay(solved, geometry, bandRef, opts) -> RayResult
+   *   bandRef : an ok band from solved.bands (carries beta, W, x_focal)
+   *   opts    : { sOffsetMm, zetaMm }   s = slit width coord (in-plane), zeta = pupil coord
+   */
+  function traceRay(solved, geometry, bandRef, opts) {
+    var s = (opts && opts.sOffsetMm) || 0;
+    var zeta = (opts && opts.zetaMm) || 0;
+    var real = geometry.apertures.mode === 'real';
+    var result = {
+      ok: false, status: null, firstStop: null, clipped: [], warnings: [],
+      s: s, zeta: zeta, lam_nm: bandRef ? bandRef.lam_nm : null,
+      S: null, L: null, Pg: null, Q: null, X: null,
+      directions: {}, visibleSegments: [], visiblePolyline: [], tracedForDebug: null,
+      x_focal: null, x_focal_analytic: bandRef ? bandRef.x_focal : null,
+      // Every residual is always present; null means "not reached", never a silent 0.
+      residuals: { gratingPlane: null, gratingLaw: null, cameraPlane: null, detectorPlane: null, qBefore: null, qCol: null, qBeforeO: null, qAfterO: null },
+      aperture: { collimator: null, grating: null, camera: null },
+    };
+
+    if (!solved || !geometry || !bandRef || !bandRef.ok) {
+      result.status = S.NO_PROPAGATING_ORDER;
+      result.warnings.push('no valid diffraction band supplied');
+      return result;
+    }
+
+    var tc = solved.tc, i = solved.i, W = solved.W, to = solved.to;
+    var Cc = geometry.C, M = geometry.M, F = geometry.F;
+    var Pg = { x: 0, y: 0 };
+
+    // --- slit point: identical for every zeta of the same s -------------------------------
+    var Sp = V.add(geometry.S0, V.mul(tc, s));
+    result.S = vec(Sp);
+
+    // --- (1) slit -> collimator ------------------------------------------------------------
+    var Lp = V.add(Cc, V.mul(tc, zeta));
+    result.L = vec(Lp);
+    var v0 = V.norm(V.sub(Lp, Sp));
+    if (!V.finite(v0)) { result.status = S.DEGENERATE_COLLIMATOR; result.warnings.push('degenerate slit->collimator ray'); return result; }
+    var denI = V.dot(v0, i);
+    if (Math.abs(denI) < 1e-12) { result.status = S.DEGENERATE_COLLIMATOR; result.warnings.push('slit->collimator ray is parallel to the collimator plane'); return result; }
+    var qBefore = V.dot(v0, tc) / denI;
+
+    // --- (2) ideal thin collimator (paraxial transfer) -------------------------------------
+    var qCol = qBefore - zeta / solved.fc;
+    var vCol = V.norm(V.add(i, V.mul(tc, qCol)));
+    result.directions.in = vec(v0);
+    result.directions.collimated = vec(vCol);
+    result.residuals.qBefore = qBefore;
+    result.residuals.qCol = qCol;
+
+    // --- (3) collimator -> fixed grating surface x = 0 --------------------------------------
+    if (!(vCol.x > 0)) {
+      result.status = S.NO_GRATING_INTERSECTION;
+      result.warnings.push('collimated ray does not travel towards +x, so it never meets x = 0');
+      result.visibleSegments.push({ from: vec(Sp), to: vec(Lp), stage: 'slit->collimator' });
+      result.visiblePolyline = [vec(Sp), vec(Lp)];
+      return result;
+    }
+    var tg = -Lp.x / vCol.x;
+    if (!(tg > 0)) {
+      result.status = S.NO_GRATING_INTERSECTION;
+      result.warnings.push('grating intersection is behind the collimator');
+      result.visibleSegments.push({ from: vec(Sp), to: vec(Lp), stage: 'slit->collimator' });
+      result.visiblePolyline = [vec(Sp), vec(Lp)];
+      return result;
+    }
+    Pg = V.add(Lp, V.mul(vCol, tg));
+    Pg.x = 0; // enforce the surface exactly; residual is reported separately
+    result.Pg = vec(Pg);
+    result.residuals.gratingPlane = V.planeResidual(Pg, geometry.planes.grating.point, geometry.planes.grating.normal);
+    result.residuals.gratingHalfWidth = Math.abs(Pg.y);
+
+    // --- finite collimator aperture (first real stop) ---------------------------------------
+    if (real) {
+      result.aperture.collimator = zeta;
+      if (geometry.apertures.collimatorHalf !== null && Math.abs(zeta) > geometry.apertures.collimatorHalf + 1e-12) {
+        return clip(result, S.CLIPPED_COLLIMATOR, 'collimator', [Sp, Lp],
+          '|zeta| = ' + Math.abs(zeta).toFixed(6) + ' mm exceeds collimator half aperture ' + geometry.apertures.collimatorHalf + ' mm');
+      }
+    }
+
+    // --- (4) grating diffraction: tangential wavevector conservation -----------------------
+    var uy = vCol.y - solved.m * solved.N * bandRef.lam_mm;
+    result.residuals.gratingLaw = (Math.sin(solved.alpha) + Math.sin(bandRef.beta)) - solved.m * solved.N * bandRef.lam_mm;
+    if (!Number.isFinite(uy) || Math.abs(uy) >= 1) {
+      result.status = S.NO_PROPAGATING_ORDER;
+      result.warnings.push('|u_y| = ' + Math.abs(uy).toPrecision(6) + ' >= 1: no propagating diffraction order for this ray');
+      result.visibleSegments.push({ from: vec(Sp), to: vec(Lp), stage: 'slit->collimator' });
+      result.visibleSegments.push({ from: vec(Lp), to: vec(Pg), stage: 'collimator->grating' });
+      result.visiblePolyline = [vec(Sp), vec(Lp), vec(Pg)];
+      return result;
+    }
+    var vg = { x: -Math.sqrt(1 - uy * uy), y: uy };
+    result.directions.diffracted = vec(vg);
+    result.residuals.diffractionSlide = uy;
+
+    // Verifying that the diffracted ray travels towards the camera plane is an INTERNAL check;
+    // it does not imply that the ray was actually reflected by the grating surface.
+    var denW = V.dot(vg, W);
+    if (!(denW > 0)) {
+      result.status = S.REJECT_BACKWARD_INTERSECTION;
+      result.warnings.push('diffracted ray does not propagate towards the camera plane (v_g . W = ' + denW.toPrecision(6) + ')');
+      result.visibleSegments.push({ from: vec(Sp), to: vec(Lp), stage: 'slit->collimator' });
+      result.visibleSegments.push({ from: vec(Lp), to: vec(Pg), stage: 'collimator->grating' });
+      result.visiblePolyline = [vec(Sp), vec(Lp), vec(Pg)];
+      return result;
+    }
+
+    // --- grating aperture: the real stop decides whether the surface is reached --------------
+    if (real && geometry.apertures.gratingHalfWidth !== null && Math.abs(Pg.y) > geometry.apertures.gratingHalfWidth + 1e-12) {
+      return clip(result, S.CLIPPED_GRATING, 'grating', [Sp, Lp, Pg],
+        '|Pg.y| = ' + Math.abs(Pg.y).toFixed(6) + ' mm exceeds grating half width ' + geometry.apertures.gratingHalfWidth + ' mm: the ray misses the physical grating');
+    }
+
+    // --- (5) grating -> camera lens plane ---------------------------------------------------
+    var tq = V.dot(V.sub(M, Pg), W) / denW;
+    if (!(tq > 0)) {
+      result.status = S.REJECT_BACKWARD_INTERSECTION;
+      result.warnings.push('camera plane intersection is behind the grating point');
+      result.visibleSegments.push({ from: vec(Sp), to: vec(Lp), stage: 'slit->collimator' });
+      result.visibleSegments.push({ from: vec(Lp), to: vec(Pg), stage: 'collimator->grating' });
+      result.visiblePolyline = [vec(Sp), vec(Lp), vec(Pg)];
+      return result;
+    }
+    var Qp = V.add(Pg, V.mul(vg, tq));
+    result.Q = vec(Qp);
+    result.aperture.camera = V.transverse(Qp, M, to);
+    result.residuals.cameraPlane = V.planeResidual(Qp, M, W);
+
+    if (real && geometry.apertures.cameraHalf !== null && Math.abs(result.aperture.camera) > geometry.apertures.cameraHalf + 1e-12) {
+      return clip(result, S.CLIPPED_CAMERA, 'camera', [Sp, Lp, Pg, Qp],
+        '|eta| = ' + Math.abs(result.aperture.camera).toFixed(6) + ' mm exceeds camera lens half aperture ' + geometry.apertures.cameraHalf + ' mm');
+    }
+
+    // --- (6) ideal thin camera lens ---------------------------------------------------------
+    var qBeforeO = V.dot(vg, to) / denW;
+    var qAfterO = qBeforeO - result.aperture.camera / solved.fo;
+    var vo = V.norm(V.add(W, V.mul(to, qAfterO)));
+    result.directions.out = vec(vo);
+    result.residuals.qBeforeO = qBeforeO;
+    result.residuals.qAfterO = qAfterO;
+
+    // --- (7) camera -> detector plane --------------------------------------------------------
+    var denDet = V.dot(vo, W);
+    if (!(denDet > 0)) {
+      result.status = S.REJECT_BACKWARD_INTERSECTION;
+      result.warnings.push('focused ray does not reach the detector plane');
+      result.visibleSegments.push({ from: vec(Sp), to: vec(Lp), stage: 'slit->collimator' });
+      result.visibleSegments.push({ from: vec(Lp), to: vec(Pg), stage: 'collimator->grating' });
+      result.visibleSegments.push({ from: vec(Pg), to: vec(Qp), stage: 'grating->camera' });
+      result.visiblePolyline = [vec(Sp), vec(Lp), vec(Pg), vec(Qp)];
+      return result;
+    }
+    var tx = V.dot(V.sub(F, Qp), W) / denDet;
+    if (!(tx > 0)) {
+      result.status = S.REJECT_BACKWARD_INTERSECTION;
+      result.warnings.push('detector intersection is behind the camera lens');
+      result.visibleSegments.push({ from: vec(Sp), to: vec(Lp), stage: 'slit->collimator' });
+      result.visibleSegments.push({ from: vec(Lp), to: vec(Pg), stage: 'collimator->grating' });
+      result.visibleSegments.push({ from: vec(Pg), to: vec(Qp), stage: 'grating->camera' });
+      result.visiblePolyline = [vec(Sp), vec(Lp), vec(Pg), vec(Qp)];
+      return result;
+    }
+    var Xp = V.add(Qp, V.mul(vo, tx));
+    result.X = vec(Xp);
+    result.residuals.detectorPlane = V.planeResidual(Xp, F, W);
+    result.x_focal = V.transverse(Xp, F, to);
+
+    result.ok = true;
+    result.status = bandRef.crossNormal ? C.WARNING_CODES.CROSS_NORMAL : S.VALID;
+    if (bandRef.crossNormal) result.warnings.push('cross-normal diffracted branch (beta < 0): valid but leaves the default same-side geometry');
+    result.visibleSegments = [
+      { from: vec(Sp), to: vec(Lp), stage: 'slit->collimator' },
+      { from: vec(Lp), to: vec(Pg), stage: 'collimator->grating' },
+      { from: vec(Pg), to: vec(Qp), stage: 'grating->camera' },
+      { from: vec(Qp), to: vec(Xp), stage: 'camera->detector' },
+    ];
+    result.visiblePolyline = [vec(Sp), vec(Lp), vec(Pg), vec(Qp), vec(Xp)];
+    result.tracedForDebug = { note: 'no debug continuation is needed: the whole ray survives the real apertures' };
+    return result;
+  }
+
+  /** Terminate a ray at the first real aperture it does not clear. */
+  function clip(result, status, stop, polyline, message) {
+    result.status = status;
+    result.firstStop = stop;
+    result.clipped = [stop];
+    result.warnings.push(message);
+    result.visibleSegments = [];
+    for (var k = 0; k + 1 < polyline.length; k++) {
+      result.visibleSegments.push({ from: vec(polyline[k]), to: vec(polyline[k + 1]), stage: k === 0 ? 'slit->collimator' : (k === 1 ? 'collimator->grating' : (k === 2 ? 'grating->camera' : 'camera->detector')) });
+    }
+    result.visiblePolyline = polyline.map(vec);
+    return result;
+  }
+
+  /**
+   * Aperture sampling grid: zeta values across the collimated-beam diameter.
+   * nRay is odd so the chief ray zeta = 0 is always present.
+   */
+  function pupilSamples(D, nRay) {
+    var n = Math.max(1, Math.round(nRay) | 0);
+    if (n % 2 === 0) n += 1;
+    var out = [];
+    for (var k = 0; k < n; k++) out.push((n === 1 ? 0 : (k / (n - 1) - 0.5)) * D);
+    return out;
+  }
+
+  /** Slit width sampling: exactly the two edges plus the centre. */
+  function slitSamples(wMm) { return [-wMm / 2, 0, wMm / 2]; }
+
+  /**
+   * Trace the visible scene: one set per wavelength band.
+   * Returns { bands: [ { band, chief, aperture: [], edges: [], stats } ] }.
+   * Only geometry-derived points are exposed for drawing.
+   */
+  function traceScene(solved, geometry) {
+    var out = { bands: [], counts: { total: 0, valid: 0, clipped: 0, rejected: 0 }, ideal: geometry.apertures.mode === 'ideal' };
+    var zetas = pupilSamples(solved.D, solved.nRay);
+    for (var b = 0; b < solved.bands.length; b++) {
+      var band = solved.bands[b];
+      if (!band.ok) { out.bands.push({ band: band, ok: false, chief: null, aperture: [], edges: [] }); continue; }
+      var chief = traceRay(solved, geometry, band, { sOffsetMm: 0, zetaMm: 0 });
+      var ap = [];
+      for (var k = 0; k < zetas.length; k++) {
+        var rr = traceRay(solved, geometry, band, { sOffsetMm: 0, zetaMm: zetas[k] });
+        out.counts.total++;
+        if (rr.status === C.STATUS.VALID) out.counts.valid++;
+        else if (String(rr.status).indexOf('CLIPPED') === 0) out.counts.clipped++;
+        else out.counts.rejected++;
+        ap.push(rr);
+      }
+      var edges = [];
+      var ss = slitSamples(solved.w_mm);
+      for (var e = 0; e < ss.length; e++) {
+        for (var z = 0; z < zetas.length; z++) {
+          edges.push(traceRay(solved, geometry, band, { sOffsetMm: ss[e], zetaMm: zetas[z] }));
+        }
+      }
+      out.bands.push({ band: band, ok: band.ok, chief: chief, aperture: ap, edges: edges, zetas: zetas });
+    }
+    return out;
+  }
+
+  C.traceRay = traceRay;
+  C.traceScene = traceScene;
+  C.trace = { traceRay: traceRay, traceScene: traceScene, pupilSamples: pupilSamples, slitSamples: slitSamples };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/core/metrics.js ===== */
+/* Derived performance numbers, all read from the immutable Solved snapshot.
+ * Every definitions that could be confused is computed separately and labelled:
+ *   R_slit      : geometric slit limit              (SPEC v3 / PHYSICS v1 section 7)
+ *   R_grating   : grating Rayleigh limit over the actually illuminated width
+ *   R_ideal     : Rayleigh limit for an unlimited entrance aperture (NOT a real instrument number)
+ * They are NEVER combined into a single sqrt(a^2+b^2) 'true resolution'. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+  var V = C.vec;
+
+  function computeMetrics(solved, geometry, scene) {
+    var lam0Nm = solved.lam0_nm;
+    var lam0Mm = solved.lam0_mm;
+    var m = solved.m, N = solved.N, fo = solved.fo, fc = solved.fc;
+    var a = solved.alpha, b = solved.beta;
+    // Frozen 'anamorphic A' = cos(alpha)/cos(beta) = 0.385170825 (SPEC v3 section 0.2, PHYSICS v1 section 6).
+    // The slit image is REDUCED by this factor (official SoL'Ex: 10 um slit -> 3.86 um); the verified
+    // image mapping D_out/D_in = D_eff*cos(beta)/cos(alpha) = 1/A = 2.59625 is what the frozen
+    // 6.018294 um needs. PHYSICS v1 section 7's formula string has the ratio inverted: docs/CONFLICTS.md C-01.
+    var A = solved.anamorphicFactor;             // cos(alpha)/cos(beta), frozen definition
+    var M_out = solved.beamWidthRatio;           // = 1/A = cos(alpha)/cos(beta) = 2.596250637
+    var wMm = solved.w_mm;
+
+    var dBeta = m * N * C.CONST.NM_TO_MM / Math.cos(b);        // rad/nm at fixed alpha
+    var dxdl = fo * dBeta;                                     // mm/nm
+    var rec = 1 / dxdl;                                        // nm/mm
+    var sampling_A = solved.pixel_um === null || solved.pixel_um === undefined
+      ? null
+      : 10 * (solved.pixel_um / 1000) / dxdl;                  // Angstrom per pixel
+
+    var wImg = wMm * (fo / fc) * M_out;                        // analytic slit image width
+    var hImg = solved.h * fo / fc;                             // spatial-direction image length (ideal)
+    var Rslit = (fc / wMm) * (Math.tan(a) + Math.sin(b) / Math.cos(a));
+    var dSlitNm = lam0Nm / Rslit;
+    var RgratingReal = m * N * geometry.beam.W_illuminated;
+    var dGratingRealNm = lam0Nm / RgratingReal;
+    var RgratingIdeal = m * N * geometry.beam.footprint;
+    var dGratingIdealNm = lam0Nm / RgratingIdeal;
+
+    var officialR = 40000;
+    var officialElemNm = lam0Nm / officialR;
+    var pixelsPerElem = sampling_A === null ? null : officialElemNm / (sampling_A / 10);
+
+    // Number of finite-resolution elements across the detector dispersion span (three bands).
+    var span = null;
+    var okBands = solved.bands.filter(function (x) { return x.ok; });
+    if (okBands.length >= 2) {
+      var xs = okBands.map(function (x) { return x.x_focal; });
+      span = Math.max.apply(null, xs) - Math.min.apply(null, xs);
+    }
+
+    // Per-band geometry, camera footprint and observed vignetting from the real trace.
+    var perBand = [];
+    var cameraEnvelope = { realReach: 0, idealAll: null };
+    for (var bi = 0; bi < solved.bands.length; bi++) {
+      var band = solved.bands[bi];
+      var entry = {
+        lam_nm: band.lam_nm, ok: band.ok, beta: band.ok ? band.beta : null,
+        beta_deg: band.ok ? band.beta_deg : null,
+        x_focal: band.ok ? band.x_focal : null,
+        crossNormal: !!band.crossNormal,
+        status: C.STATUS.VALID,
+        transmitted: 0, clipped: 0, rejected: 0, sampled: 0,
+        cameraFootprint: null, slitImageWidth: null,
+      };
+      if (!band.ok) { entry.status = band.errors && band.errors[0] ? band.errors[0].code : C.STATUS.NO_PROPAGATING_ORDER; perBand.push(entry); continue; }
+      if (scene) {
+        var sceneBand = null;
+        for (var q = 0; q < scene.bands.length; q++) if (scene.bands[q].band === band) sceneBand = scene.bands[q];
+        if (sceneBand) {
+          var etaMax = 0;
+          for (var k = 0; k < sceneBand.aperture.length; k++) {
+            var rr = sceneBand.aperture[k];
+            entry.sampled++;
+            if (rr.status === C.STATUS.VALID || rr.status === C.WARNING_CODES.CROSS_NORMAL) entry.transmitted++;
+            else if (String(rr.status).indexOf('CLIPPED') === 0) entry.clipped++;
+            else entry.rejected++;
+            if (rr.Q && Number.isFinite(rr.aperture.camera)) etaMax = Math.max(etaMax, Math.abs(rr.aperture.camera));
+          }
+          entry.cameraFootprint = 2 * etaMax;
+          cameraEnvelope.realReach = Math.max(cameraEnvelope.realReach, etaMax * 2);
+          // observed slit image width from the real trace of the two slit edges (chief pupil)
+          var left = null, right = null;
+          for (var e = 0; e < sceneBand.edges.length; e++) {
+            var er = sceneBand.edges[e];
+            if (!(er.ok || er.status === C.WARNING_CODES.CROSS_NORMAL)) continue;
+            if (Math.abs(er.zeta) > 1e-12) continue;
+            if (er.s < 0) left = er.x_focal; else if (er.s > 0) right = er.x_focal;
+          }
+          if (left !== null && right !== null) entry.slitImageWidth = Math.abs(right - left);
+          if (entry.clipped > 0 && entry.transmitted > 0) entry.status = 'PARTIAL_VIGNETTE';
+          else if (entry.transmitted === 0 && entry.clipped > 0) entry.status = 'CLIPPED';
+          else if (entry.rejected > 0 && entry.transmitted === 0) entry.status = 'NO_RAY';
+        }
+      }
+      perBand.push(entry);
+    }
+
+    // Ideal (unlimited) camera diameter for comparison: envelope over all on-axis wavelengths
+    // extended to the uncropped grating footprint. Reported as an ideal figure, never as hardware.
+    var idealRays = null;
+    if (geometry.apertures.mode === 'ideal') {
+      cameraEnvelope.idealAll = cameraEnvelope.realReach;
+    }
+
+    var metrics = {
+      // dispersion
+      dbeta_rad_per_nm: dBeta, dxdl_mm_per_nm: dxdl, dldx_nm_per_mm: rec,
+      sampling_A_per_pixel: sampling_A, dlam_10nm_mm: 10 * dxdl,
+      // slit / image
+      wImage_mm: wImg, wImage_um: wImg * 1000, hImage_mm: hImg,
+      imageMagnification: M_out, anamorphicFactor: A,
+      // resolution, kept separate on purpose
+      Rslit: Rslit, dSlit_nm: dSlitNm, dSlit_pm: dSlitNm * 1000,
+      Rgrating_real: RgratingReal, dGrating_real_nm: dGratingRealNm, dGrating_real_pm: dGratingRealNm * 1000,
+      Rgrating_ideal: RgratingIdeal, dGrating_ideal_nm: dGratingIdealNm,
+      officialR: officialR, officialElement_nm: officialElemNm, pixelsPerResolutionElement: pixelsPerElem,
+      // aperture / beams
+      footprint_mm: geometry.beam.footprint, D_eff_mm: geometry.beam.D_eff,
+      W_illuminated_mm: geometry.beam.W_illuminated, D_out_mm: geometry.beam.D_out,
+      fNumberEffective: geometry.beam.fNumberEffective, truncated: geometry.beam.truncated,
+      // focal plane
+      span_mm: span, perBand: perBand,
+      cameraEnvelope: cameraEnvelope,
+      // limits
+      lambdaDesignMax_nm: solved.lambdaDesignMax_nm,
+      lambdaAsinMax_nm: solved.lambdaAsinMax_nm,
+      lambdaOrderMax_nm: solved.lambdaOrderMax_nm,
+      modes: { constraint: solved.constraint, aperture: solved.mode },
+      warnings: solved.warnings.slice(),
+    };
+    return metrics;
+  }
+
+  C.computeMetrics = computeMetrics;
+  C.metrics = { computeMetrics: computeMetrics };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/core/assert.js ===== */
+/* Geometric / numerical assertions (SPEC v3 section 7.1 and PHYSICS v1 section 8).
+ * Every assertion returns a residual and a boolean; nothing is clamped, abs()-ed or skipped
+ * silently. A failed assertion is data, not an exception, so reports can show all of them. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+  var V = C.vec;
+  var T = C.TOL;
+
+  function near(name, residual, tol, unit, note) {
+    var abs = Math.abs(residual);
+    return { name: name, pass: abs <= tol, residual: residual, absResidual: abs, tolerance: tol, unit: unit || '', note: note || '' };
+  }
+
+  function assertGeometry(solved, geometry) {
+    var out = [];
+    var g = geometry;
+    out.push(near('grating normal . tangent', V.dot(solved.ng, solved.tg), T.ORTHOGONAL));
+    out.push(near('incident . collimator transverse', V.dot(solved.i, solved.tc), T.ORTHOGONAL));
+    out.push(near('diffracted . camera transverse', V.dot(solved.W, solved.to), T.ORTHOGONAL));
+    out.push(near('camera transverse . detector normal', V.dot(solved.to, solved.W), T.ORTHOGONAL));
+    out.push(near('grating surface x = 0', g.P.x, T.PLANE_MM, 'mm'));
+    out.push(near('slit - collimator distance = fc', V.dist(g.S0, g.C) - solved.fc, T.PLANE_MM, 'mm'));
+    out.push(near('camera - detector distance = fo', V.dist(g.M, g.F) - solved.fo, T.PLANE_MM, 'mm'));
+    out.push(near('grating - collimator distance = Lc', V.dist(g.P, g.C) - solved.Lc, T.PLANE_MM, 'mm'));
+    out.push(near('grating - camera distance = Lo', V.dist(g.P, g.M) - solved.Lo, T.PLANE_MM, 'mm'));
+    out.push(near('collimator centre on its plane', V.planeResidual(g.C, g.planes.collimator.point, g.planes.collimator.normal), T.PLANE_MM, 'mm'));
+    out.push(near('camera centre on its plane', V.planeResidual(g.M, g.planes.camera.point, g.planes.camera.normal), T.PLANE_MM, 'mm'));
+    out.push(near('detector centre on its plane', V.planeResidual(g.F, g.planes.detector.point, g.planes.detector.normal), T.PLANE_MM, 'mm'));
+    out.push(near('grating law residual', solved.lawResidual, T.GRATING_LAW));
+    out.push(near('arm angle = G', solved.armAngleG - solved.G, T.ANGLE_DEG * C.CONST.D2R, 'rad'));
+    out.push(near('propagation angle = 180 - G', solved.propagationAngle - (Math.PI - solved.G), T.ANGLE_DEG * C.CONST.D2R, 'rad'));
+    // every design band must satisfy the grating equation with the same alpha
+    for (var b = 0; b < solved.bands.length; b++) {
+      var band = solved.bands[b];
+      if (!band.ok) continue;
+      var resid = Math.sin(solved.alpha) + Math.sin(band.beta) - solved.m * solved.N * band.lam_mm;
+      out.push(near('grating law band ' + band.lam_nm + ' nm', resid, T.GRATING_LAW));
+    }
+    return out;
+  }
+
+  function assertRay(solved, geometry, ray) {
+    var out = [];
+    if (!ray || !ray.S) { out.push({ name: 'ray exists', pass: false, note: ray ? ray.status : 'null ray' }); return out; }
+    var g = geometry;
+    var reach = ray.visiblePolyline.length;
+
+    // S must be exactly S0 + s*tc and independent of zeta (BUG-03 regression guard)
+    var Sexp = V.add(g.S0, V.mul(solved.tc, ray.s));
+    out.push(near('S = S0 + s*tc', V.dist(ray.S, Sexp), T.CHIEF_CENTRE_MM, 'mm'));
+    out.push(near('L = C + zeta*tc', V.dist(ray.L, V.add(g.C, V.mul(solved.tc, ray.zeta))), T.CHIEF_CENTRE_MM, 'mm'));
+
+    if (ray.Pg) {
+      out.push(near('Pg on grating plane x = 0', ray.Pg.x, T.PLANE_MM, 'mm'));
+      out.push(near('Pg on grating plane (residual)', ray.residuals.gratingPlane, T.PLANE_MM, 'mm'));
+    }
+    if (ray.Q) out.push(near('Q on camera plane', ray.residuals.cameraPlane, T.PLANE_MM, 'mm'));
+    if (ray.X) out.push(near('X on detector plane', ray.residuals.detectorPlane, T.PLANE_MM, 'mm'));
+
+    // visible geometry must never pass the first real stop
+    if (String(ray.status).indexOf('CLIPPED') === 0) {
+      var last = ray.visiblePolyline[reach - 1];
+      var stopName = ray.firstStop;
+      if (stopName === 'grating') {
+        out.push(near('clipped ray stops at the grating plane', Math.abs(ray.Pg.y) - g.apertures.gratingHalfWidth > 0 ? 0 : 1, 0, 'mm', 'must exceed the half width'));
+        out.push(near('clipped ray polyline ends on the grating', V.dist(last, ray.Pg), T.PLANE_MM, 'mm'));
+      } else if (stopName === 'collimator') {
+        out.push(near('clipped ray polyline ends on the collimator', V.dist(last, ray.L), T.PLANE_MM, 'mm'));
+      } else if (stopName === 'camera') {
+        out.push(near('clipped ray polyline ends on the camera plane', V.dist(last, ray.Q), T.PLANE_MM, 'mm'));
+      }
+      out.push({ name: 'clipped ray has no downstream vertices', pass: ray.visiblePolyline.length <= 4, note: 'vertices=' + ray.visiblePolyline.length + ' stop=' + stopName });
+    }
+
+    out.push({ name: 'all vertices finite', pass: ray.visiblePolyline.every(V.finite), note: '' });
+    return out;
+  }
+
+  /** Chief-ray five-centre check: S0, C, P, M, F with < 1e-8 mm. */
+  function assertChiefRay(solved, geometry, scene) {
+    var out = [];
+    var chief = null;
+    for (var b = 0; b < scene.bands.length; b++) {
+      if (scene.bands[b].band.isDesign) { chief = scene.bands[b].chief; break; }
+    }
+    if (!chief) { out.push({ name: 'chief ray present', pass: false }); return out; }
+    out.push(near('chief S = slit centre', V.dist(chief.S, geometry.S0), T.CHIEF_CENTRE_MM, 'mm'));
+    out.push(near('chief L = collimator centre', V.dist(chief.L, geometry.C), T.CHIEF_CENTRE_MM, 'mm'));
+    out.push(near('chief Pg = grating centre', V.dist(chief.Pg, geometry.P), T.CHIEF_CENTRE_MM, 'mm'));
+    out.push(near('chief Q = camera centre', V.dist(chief.Q, geometry.M), T.CHIEF_CENTRE_MM, 'mm'));
+    out.push(near('chief X = detector centre', V.dist(chief.X, geometry.F), T.CHIEF_CENTRE_MM, 'mm'));
+    out.push(near('chief focal x = 0', chief.x_focal, T.FOCUS_MM, 'mm'));
+    return out;
+  }
+
+  /** Aperture-consistency assertions inside one band, including the slit-image width. */
+  function assertPupilConsistency(solved, geometry, sceneBand) {
+    var out = [];
+    if (!sceneBand || !sceneBand.aperture.length) return out;
+    // parallel after the collimator, and identical S for every zeta
+    for (var k = 0; k < sceneBand.aperture.length; k++) {
+      var ray = sceneBand.aperture[k];
+      if (!ray.directions.collimated) continue;
+      var cross = Math.abs(V.cross(ray.directions.collimated, solved.i));
+      out.push(near('collimated direction parallel to i (sample ' + k + ')', cross, 1e-12));
+      out.push(near('slit point shared across pupil (sample ' + k + ')', V.dist(ray.S, geometry.S0), T.CHIEF_CENTRE_MM, 'mm'));
+    }
+    // focal x must not depend on zeta for the same s (identical control with the design band)
+    var xs = [];
+    for (var q = 0; q < sceneBand.aperture.length; q++) {
+      var rr = sceneBand.aperture[q];
+      if ((rr.status === C.STATUS.VALID || rr.status === C.WARNING_CODES.CROSS_NORMAL) && Math.abs(rr.s) < 1e-15) xs.push(rr.x_focal);
+    }
+    if (xs.length >= 2) {
+      var spread = Math.max.apply(null, xs) - Math.min.apply(null, xs);
+      out.push(near('focal x independent of pupil', spread, T.FOCUS_MM, 'mm'));
+    }
+    // focal x must equal the analytic fo*tan(beta-beta0)
+    for (var w = 0; w < sceneBand.aperture.length; w++) {
+      var rw = sceneBand.aperture[w];
+      if (rw.ok && rw.x_focal !== null && rw.x_focal_analytic !== null) {
+        out.push(near('focal x = fo*tan(beta-beta0) (sample ' + w + ')', rw.x_focal - rw.x_focal_analytic, T.FOCUS_MM, 'mm'));
+      }
+    }
+    return out;
+  }
+
+  /** Slit image width from the two slit edges, compared with w*(fo/fc)*cos(beta)/cos(alpha). */
+  function assertSlitImage(solved, geometry, sceneBand, expectedMm, relTol) {
+    var out = [];
+    var left = null, right = null;
+    for (var e = 0; e < sceneBand.edges.length; e++) {
+      var er = sceneBand.edges[e];
+      if (!(er.ok || er.status === C.WARNING_CODES.CROSS_NORMAL)) continue;
+      if (Math.abs(er.zeta) > 1e-12) continue;
+      if (er.s < 0) left = er.x_focal;
+      else if (er.s > 0) right = er.x_focal;
+    }
+    if (left === null || right === null) { out.push({ name: 'slit image width measurable', pass: false }); return out; }
+    var measured = Math.abs(right - left);
+    var rel = Math.abs(measured - expectedMm) / Math.abs(expectedMm);
+    out.push({
+      name: 'slit image width = w*(fo/fc)*cos(beta)/cos(alpha)',
+      pass: rel <= (relTol === undefined ? T.IMAGE_WIDTH_REL : relTol),
+      measured: measured, expected: expectedMm, relError: rel,
+      tolerance: relTol === undefined ? T.IMAGE_WIDTH_REL : relTol,
+      note: 'absolute difference ' + Math.abs(measured - expectedMm).toExponential(3) + ' mm',
+    });
+    return out;
+  }
+
+  /** Convenience: summarise a list of assertion records. */
+  function summarise(list) {
+    var failed = list.filter(function (x) { return !x.pass; });
+    return { total: list.length, passed: list.length - failed.length, failed: failed.length, failures: failed };
+  }
+
+  C.assertGeometry = assertGeometry;
+  C.assertRay = assertRay;
+  C.assertChiefRay = assertChiefRay;
+  C.assertPupilConsistency = assertPupilConsistency;
+  C.assertSlitImage = assertSlitImage;
+  C.summariseAssertions = summarise;
+  C.assertions = {
+    assertGeometry: assertGeometry, assertRay: assertRay, assertChiefRay: assertChiefRay,
+    assertPupilConsistency: assertPupilConsistency, assertSlitImage: assertSlitImage, summarise: summarise,
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/core/index.js ===== */
+/* Core public surface. Load order matters: constants -> vec2 -> design/validate -> geometry
+ * -> trace -> metrics -> assert. In the browser the same files are inlined in this order by
+ * build/build.mjs, so tests and the shipped page exercise identical code. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+
+  /** One-stop convenience used by tests, panels and the canvas. */
+  C.solveScene = function solveScene(rawInput) {
+    var v = C.parseAndValidateInput(rawInput);
+    if (!v.ok) return { ok: false, stage: 'input', status: 'INVALID_INPUT', errors: v.errors };
+    var d = C.solveDesign(v.input);
+    if (!d.ok) return { ok: false, stage: 'design', status: d.status, errors: d.errors, input: v.input };
+    var geometry = C.buildGeometry(d.solved);
+    var scene = C.traceScene(d.solved, geometry);
+    var metrics = C.computeMetrics(d.solved, geometry, scene);
+    return {
+      ok: true, input: v.input, solved: d.solved, geometry: geometry, scene: scene, metrics: metrics,
+      status: d.solved.status,
+    };
+  };
+
+  C.LOAD_ORDER = ['constants', 'vec2', 'validate', 'design', 'geometry', 'trace', 'metrics', 'assert', 'index'];
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/ui/style.js ===== */
+/* Presentation tokens for the UI layer. No physics here - only colours, fonts and line widths.
+ * Loaded in Node too (harmless) so the browser bundle and tests share one source order. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+
+  C.STYLE = {
+    // three-band colours: for identification only, NOT a claim of colorimetric accuracy
+    bandColors: ['#8a7dff', '#43d17a', '#ff5c5c'],
+    bandNames: ['blue side', 'design', 'red side'],
+    clippedColor: '#ff6b6b',
+    axisColor: 'rgba(159,176,192,0.30)',
+    gratingColor: '#ffd479',
+    lensColor: '#4db8ff',
+    detectorColor: '#9fb0c0',
+    slitColor: '#ffffff',
+    labelColor: '#c7d5e2',
+    warnColor: '#ffb454',
+    bg: '#0f1419',
+    gridColor: 'rgba(159,176,192,0.10)',
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/ui/projection.js ===== */
+/* CR-VIEW-01 view projection: a DISPLAY-only coordinate change.
+ *
+ * The optical physics keeps its world frame (grating plane x = 0, tangent (0,1), normal (-1,0));
+ * this module only re-expresses the scene in a frame that makes the CR requirement natural:
+ *
+ *   u : along the incident chief axis  i = normalize(P - C)   -> 'to the right'
+ *   v : t = (-i.y, i.x)                                       -> 'down the screen'
+ *
+ * Because i and t are orthonormal, the projection is a rigid rotation + translation:
+ * distances, angles and the handedness of the physics are preserved exactly.
+ *
+ * Verified against the CR section 3.3 table with the default parameters:
+ *   (u,v) S = (-160.000, 0.000)   C = (-80.000, 0.000)   P = (0,0)
+ *   M = (-49.742, +33.552)        F = (-153.372, +103.451)
+ *   W_view = (-cos G, +sin G) = (-0.829038, +0.559193)
+ */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+  var V = C.vec;
+
+  /**
+   * Build the world -> view projection for one solved snapshot.
+   * Returns { i, t, P, toView, dirToView, identity }.
+   * `identity` is true when the view frame already IS the world frame (never for SoL'Ex, but it
+   * keeps the transform debuggable and lets tests assert the projection is not a no-op).
+   */
+  function makeWorldToView(solved, geometry) {
+    var P = geometry.P;
+    var iRaw = V.sub(P, geometry.C);
+    var i = V.norm(iRaw);
+    var t = { x: -i.y, y: i.x };
+    if (!V.finite(i) || !V.finite(t)) {
+      throw new Error('view projection: degenerate incident axis (C coincides with P)');
+    }
+    var toView = function (X) {
+      var d = V.sub(X, P);
+      return { x: V.dot(d, i), y: V.dot(d, t) };
+    };
+    var dirToView = function (d) { return { x: V.dot(d, i), y: V.dot(d, t) }; };
+    var fromView = function (uv) {
+      return { x: P.x + uv.x * i.x + uv.y * t.x, y: P.y + uv.x * i.y + uv.y * t.y };
+    };
+    return {
+      P: { x: P.x, y: P.y },
+      i: i, t: t,
+      toView: toView, dirToView: dirToView, fromView: fromView,
+      identity: Math.abs(i.x - 1) < 1e-15 && Math.abs(i.y) < 1e-15,
+      // The rotation angle that maps world -> view, kept for reports and angle annotations.
+      rotationRad: Math.atan2(-i.y, i.x),
+    };
+  }
+
+  /**
+   * Bounds of everything that must stay visible, expressed in VIEW coordinates.
+   * Accepts the same inputs the canvas collects, but every point is projected first.
+   */
+  function viewBounds(projection, solved, geometry, scene, extra) {
+    var pts = [];
+    var V2 = C.vec;
+    var push = function (worldPt) {
+      if (!worldPt || !Number.isFinite(worldPt.x) || !Number.isFinite(worldPt.y)) return;
+      var uv = projection.toView(worldPt);
+      if (Number.isFinite(uv.x) && Number.isFinite(uv.y)) pts.push(uv);
+    };
+
+    push(geometry.S0); push(geometry.C); push(geometry.P); push(geometry.M); push(geometry.F);
+    var colHalf = geometry.apertures.collimatorHalf === null ? solved.D / 2 : geometry.apertures.collimatorHalf;
+    push(V2.add(geometry.C, V2.mul(solved.tc, colHalf)));
+    push(V2.add(geometry.C, V2.mul(solved.tc, -colHalf)));
+    var camHalf = geometry.apertures.cameraHalf === null ? Math.max(solved.D, geometry.beam.D_out) / 2 : geometry.apertures.cameraHalf;
+    push(V2.add(geometry.M, V2.mul(solved.to, camHalf)));
+    push(V2.add(geometry.M, V2.mul(solved.to, -camHalf)));
+    var grHalf = geometry.apertures.gratingHalfWidth === null ? Math.max(geometry.beam.W_illuminated, solved.D) / 2 : geometry.apertures.gratingHalfWidth;
+    push({ x: 0, y: grHalf }); push({ x: 0, y: -grHalf });
+    push(V2.add(geometry.S0, V2.mul(solved.tc, solved.w_mm / 2)));
+    push(V2.add(geometry.S0, V2.mul(solved.tc, -solved.w_mm / 2)));
+    var xs = solved.bands.filter(function (b) { return b.ok; }).map(function (b) { return b.x_focal; });
+    var span = xs.length ? Math.max(Math.abs(Math.min.apply(null, xs)), Math.abs(Math.max.apply(null, xs))) : 1;
+    var detHalfX = Math.max(span * 1.6, solved.w_mm * 20, 1);
+    push(V2.add(geometry.F, V2.mul(solved.to, detHalfX)));
+    push(V2.add(geometry.F, V2.mul(solved.to, -detHalfX)));
+    var detHalfH = Math.max(solved.h * solved.fo / solved.fc / 2, 0.5);
+    push(V2.add(geometry.F, V2.mul(solved.tg, detHalfH)));
+    push(V2.add(geometry.F, V2.mul(solved.tg, -detHalfH)));
+    if (scene) {
+      for (var bi = 0; bi < scene.bands.length; bi++) {
+        var sb = scene.bands[bi];
+        var rays = [sb.chief].concat(sb.aperture || []).concat(sb.edges || []);
+        for (var ri = 0; ri < rays.length; ri++) {
+          var r = rays[ri];
+          if (!r) continue;
+          for (var vi = 0; vi < r.visiblePolyline.length; vi++) push(r.visiblePolyline[vi]);
+        }
+      }
+    }
+    if (extra) for (var ei = 0; ei < extra.length; ei++) push(extra[ei]);
+
+    var b = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    for (var k = 0; k < pts.length; k++) {
+      b.minX = Math.min(b.minX, pts[k].x); b.maxX = Math.max(b.maxX, pts[k].x);
+      b.minY = Math.min(b.minY, pts[k].y); b.maxY = Math.max(b.maxY, pts[k].y);
+    }
+    if (!Number.isFinite(b.minX)) return { minX: -100, maxX: 100, minY: -100, maxY: 100 };
+    return b;
+  }
+
+  C.makeWorldToView = makeWorldToView;
+  C.viewBounds = viewBounds;
+  C.projection = { makeWorldToView: makeWorldToView, viewBounds: viewBounds };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/ui/viewport.js ===== */
+/* Screen mapping for VIEW coordinates (CR-VIEW-01).
+ *
+ * The physics world frame is projected into view coordinates by src/ui/projection.js:
+ *   u = along the incident chief axis (left -> right on screen)
+ *   v = perpendicular to it, increasing DOWN the screen
+ *
+ * This module owns the single affine map view(mm) -> pixels:
+ *   x_px = x0 + k * u,   y_px = y0 + k * v,   k > 0 px/mm (same for both axes)
+ * There is deliberately NO extra y flip here: the view frame already points down, and a second
+ * flip is exactly what would push the diffracted arm to the wrong side of the picture. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+
+  function makeViewport(bounds, widthPx, heightPx, paddingPx) {
+    var pad = paddingPx === undefined ? 26 : paddingPx;
+    var wMm = Math.max(bounds.maxX - bounds.minX, 1e-6);
+    var hMm = Math.max(bounds.maxY - bounds.minY, 1e-6);
+    var usableW = Math.max(widthPx - 2 * pad, 40);
+    var usableH = Math.max(heightPx - 2 * pad, 40);
+    var scale = Math.min(usableW / wMm, usableH / hMm);
+    var cu = (bounds.minX + bounds.maxX) / 2;
+    var cv = (bounds.minY + bounds.maxY) / 2;
+    var x0 = widthPx / 2 - cu * scale;
+    var y0 = heightPx / 2 - cv * scale;
+    return {
+      scale: scale,
+      widthPx: widthPx, heightPx: heightPx, paddingPx: pad,
+      centerView: { x: cu, y: cv },
+      originPx: { x: x0, y: y0 },
+      /** view (mm, +v down) -> screen pixels */
+      toScreen: function (p) { return { x: x0 + p.x * scale, y: y0 + p.y * scale }; },
+      /** screen pixels -> view (mm) */
+      toView: function (p) { return { x: (p.x - x0) / scale, y: (p.y - y0) / scale }; },
+      lengthPx: function (mm) { return mm * scale; },
+      /** Physical mm per screen pixel, for labels and tolerance checks. */
+      mmPerPx: function () { return 1 / scale; },
+    };
+  }
+
+  C.makeViewport = makeViewport;
+  C.viewport = { makeViewport: makeViewport };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/ui/canvas.js ===== */
+/* Canvas renderer for CR-VIEW-01.
+ *
+ * Geometry arrives in WORLD coordinates (physics) and is projected ONCE per frame into view
+ * coordinates by src/ui/projection.js before any screen mapping happens:
+ *
+ *   world --projection--> view (u right, v down) --viewport--> screen pixels
+ *
+ * The renderer still never constructs, clamps or repairs an intersection: every polyline vertex
+ * comes from RayResult.visiblePolyline, every element is drawn from its own plane and aperture,
+ * and a clipped ray stops exactly where the trace stopped. Only the projection changed. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+  var V = C.vec;
+
+  function makeRenderer(ctx, widthPx, heightPx) {
+    var R = {
+      ctx: ctx, w: widthPx, h: heightPx,
+      view: null, proj: null,
+      labelRects: [], drawnLabels: [],
+      counters: { raysDrawn: 0, raysClipped: 0, segments: 0, apertureRaysDrawn: 0, edgeRaysDrawn: 0, chiefRaysDrawn: 0 },
+    };
+
+    var WV = function (X) { return R.proj.toView(X); };
+    var DV = function (d) { return R.proj.dirToView(d); };
+    var SP = function (X) { return R.view.toScreen(WV(X)); };
+
+    /** Segment between two WORLD points. */
+    function segW(a, b, style, lw) { segV(WV(a), WV(b), style, lw); }
+
+    /** Segment between two already-projected VIEW points. */
+    function segV(a, b, style, lw) {
+      var A = R.view.toScreen(a), B = R.view.toScreen(b);
+      ctx.save();
+      if (style.color) ctx.strokeStyle = style.color;
+      if (style.alpha !== undefined) ctx.globalAlpha = style.alpha;
+      if (style.dash) ctx.setLineDash(style.dash);
+      ctx.lineWidth = lw || 1;
+      ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+      ctx.restore();
+      R.counters.segments++;
+    }
+
+    function dotW(p, style, radius) {
+      var P = R.view.toScreen(WV(p));
+      ctx.save();
+      ctx.fillStyle = style.color || '#fff';
+      if (style.alpha !== undefined) ctx.globalAlpha = style.alpha;
+      ctx.beginPath(); ctx.arc(P.x, P.y, radius || 3, 0, 2 * Math.PI); ctx.fill();
+      ctx.restore();
+    }
+
+    /** Label anchored to a WORLD point; text itself stays horizontal and readable. */
+    function text(str, worldPt, dx, dy, color, font) {
+      var P = SP(worldPt);
+      var f = font || '11px "Segoe UI", "Microsoft YaHei", system-ui, sans-serif';
+      ctx.save();
+      ctx.font = f;
+      var tw = ctx.measureText(str).width;
+      var th = 13;
+      var prefer = [
+        [dx, dy], [dx, dy - 14], [dx, dy + 16], [dx - tw - 8, dy], [dx - tw / 2, dy - 16],
+        [dx + 10, dy - 22], [dx - 10, dy + 24], [dx, dy - 30], [dx, dy + 32],
+      ];
+      var chosen = null;
+      for (var i = 0; i < prefer.length; i++) {
+        var x = P.x + prefer[i][0], y = P.y + prefer[i][1];
+        var rect = { x: x - 2, y: y - th + 2, w: tw + 4, h: th + 2 };
+        var inside = rect.x >= 2 && rect.y >= 2 && rect.x + rect.w <= R.w - 2 && rect.y + rect.h <= R.h - 2;
+        if (!inside) continue;
+        var clash = false;
+        for (var j = 0; j < R.labelRects.length; j++) {
+          var b = R.labelRects[j];
+          if (rect.x < b.x + b.w && b.x < rect.x + rect.w && rect.y < b.y + b.h && b.y < rect.y + rect.h) { clash = true; break; }
+        }
+        if (!clash) { chosen = rect; break; }
+      }
+      if (!chosen) {
+        var x0 = Math.min(Math.max(P.x + dx, 2), Math.max(2, R.w - tw - 2));
+        var y0 = Math.min(Math.max(P.y + dy, th), Math.max(th, R.h - 2));
+        chosen = { x: x0 - 2, y: y0 - th + 2, w: tw + 4, h: th + 2, clamped: true };
+      }
+      R.labelRects.push(chosen);
+      ctx.fillStyle = 'rgba(15,20,25,0.86)';
+      ctx.fillRect(chosen.x, chosen.y, chosen.w, chosen.h);
+      ctx.fillStyle = color || C.STYLE.labelColor;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.fillText(str, chosen.x + 2, chosen.y + th - 2);
+      ctx.restore();
+      R.drawnLabels.push({ text: str, rect: chosen, world: { x: worldPt.x, y: worldPt.y } });
+      return chosen;
+    }
+
+    /** Lens slab: aperture segment plus two arcs drawn along the local (projected) normal. */
+    function lens(centre, transverse, normal, halfWidth, label, color) {
+      if (halfWidth === null || halfWidth === undefined) return;
+      var cV = WV(centre);
+      var halfVecV = V.mul(DV(transverse), halfWidth);   // length preserved: |DV(t)| = 1
+      var aV = V.add(cV, halfVecV), bV = V.add(cV, V.mul(halfVecV, -1));
+      segV(aV, bV, { color: color, alpha: 0.95 }, 2.6);
+      var bulgeMm = Math.max(R.view.mmPerPx() * 4, halfWidth * 0.10);
+      var A = R.view.toScreen(aV), B = R.view.toScreen(bV), Ctr = R.view.toScreen(cV);
+      var nV = DV(normal);
+      var nPx = R.view.toScreen(V.add(cV, nV));
+      var nx = nPx.x - Ctr.x, ny = nPx.y - Ctr.y;
+      var nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+      var bulgePx = Math.max(3, R.view.lengthPx(bulgeMm));
+      ctx.save();
+      ctx.strokeStyle = color; ctx.globalAlpha = 0.85; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(A.x, A.y);
+      ctx.quadraticCurveTo((A.x + B.x) / 2 + nx * bulgePx, (A.y + B.y) / 2 + ny * bulgePx, B.x, B.y);
+      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(A.x, A.y);
+      ctx.quadraticCurveTo((A.x + B.x) / 2 - nx * bulgePx, (A.y + B.y) / 2 - ny * bulgePx, B.x, B.y);
+      ctx.stroke();
+      ctx.restore();
+      if (label) text(label, centre, 7, -9, color);
+      return { aView: aV, bView: bV };
+    }
+
+    /** Reflectance grating drawn exactly on the world plane x = 0, ribs along the true normal. */
+    function grating(solved, geometry, label) {
+      var half = geometry.apertures.gratingHalfWidth;
+      var halfMm = half === null ? Math.max(geometry.beam.W_illuminated, solved.D) / 2 : half;
+      var tV = DV({ x: 0, y: 1 });          // grating tangent in view space (tilted on screen)
+      var nV = DV(solved.ng);               // physics normal, also projected
+      var halfVec = V.mul(tV, halfMm);
+      var a = V.mul(halfVec, 1), b = V.mul(halfVec, -1);
+      segV(a, b, { color: C.STYLE.gratingColor }, 3.2);
+      var ribs = 26;
+      var ribLen = Math.max(geometry.beam.D_eff, 2) * 0.22;
+      for (var i = 0; i <= ribs; i++) {
+        var f = i / ribs;
+        var base = V.add(a, V.mul(V.sub(b, a), f));
+        segV(base, V.add(base, V.mul(nV, ribLen)), { color: C.STYLE.gratingColor, alpha: 0.40 }, 1);
+      }
+      segV({ x: 0, y: 0 }, V.mul(nV, halfMm * 0.9), { color: C.STYLE.gratingColor, alpha: 0.55, dash: [4, 4] }, 1);
+      if (label) text(label, { x: 0, y: halfMm }, 8, -6, C.STYLE.gratingColor);
+      return halfMm;
+    }
+
+    /** Honest aperture edges: mark them so the reader can see the physical stop. */
+    function apertureEdges(geometry, solved) {
+      var marks = [];
+      if (geometry.apertures.gratingHalfWidth !== null) {
+        marks.push({ p: { x: 0, y: geometry.apertures.gratingHalfWidth }, c: C.STYLE.gratingColor });
+        marks.push({ p: { x: 0, y: -geometry.apertures.gratingHalfWidth }, c: C.STYLE.gratingColor });
+      }
+      if (geometry.apertures.collimatorHalf !== null) {
+        marks.push({ p: V.add(geometry.C, V.mul(solved.tc, geometry.apertures.collimatorHalf)), c: C.STYLE.lensColor });
+        marks.push({ p: V.add(geometry.C, V.mul(solved.tc, -geometry.apertures.collimatorHalf)), c: C.STYLE.lensColor });
+      }
+      if (geometry.apertures.cameraHalf !== null) {
+        marks.push({ p: V.add(geometry.M, V.mul(solved.to, geometry.apertures.cameraHalf)), c: C.STYLE.lensColor });
+        marks.push({ p: V.add(geometry.M, V.mul(solved.to, -geometry.apertures.cameraHalf)), c: C.STYLE.lensColor });
+      }
+      for (var i = 0; i < marks.length; i++) dotW(marks[i].p, { color: marks[i].c, alpha: 0.9 }, 2.2);
+      return marks;
+    }
+
+    /** One traced ray: world polyline -> view polyline, vertex for vertex, in order. */
+    function ray(rayResult, color, alpha, lw) {
+      var poly = rayResult.visiblePolyline;
+      var view = new Array(poly.length);
+      for (var k = 0; k < poly.length; k++) view[k] = WV(poly[k]);
+      for (var i = 0; i + 1 < poly.length; i++) {
+        segV(view[i], view[i + 1], { color: color, alpha: alpha }, lw);
+      }
+      var clipped = String(rayResult.status).indexOf('CLIPPED') === 0;
+      if (clipped) {
+        R.counters.raysClipped++;
+        var end = view[view.length - 1];
+        var P = R.view.toScreen(end);
+        ctx.save();
+        ctx.strokeStyle = C.STYLE.clippedColor; ctx.lineWidth = 2; ctx.globalAlpha = 0.95;
+        ctx.beginPath();
+        ctx.moveTo(P.x - 3, P.y - 3); ctx.lineTo(P.x + 3, P.y + 3);
+        ctx.moveTo(P.x + 3, P.y - 3); ctx.lineTo(P.x - 3, P.y + 3);
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        R.counters.raysDrawn++;
+      }
+      return view;
+    }
+
+    function detector(solved, geometry, metrics, showLabels) {
+      var F = geometry.F, to = solved.to;
+      var xs = solved.bands.filter(function (b) { return b.ok; }).map(function (b) { return b.x_focal; });
+      var span = xs.length ? Math.max(Math.abs(Math.min.apply(null, xs)), Math.abs(Math.max.apply(null, xs))) : 1;
+      var halfX = Math.max(span * 1.5, solved.w_mm * 30, 0.5);
+      var FV = WV(F), toV = DV(to), tgV = DV(solved.tg);
+      // Fully opaque: the detector surface must not be tinted by the rays drawn underneath it.
+      segV(V.add(FV, V.mul(toV, halfX)), V.add(FV, V.mul(toV, -halfX)), { color: C.STYLE.detectorColor }, 3.4);
+      var halfH = Math.max(solved.h * solved.fo / solved.fc / 2, 0.05);
+      for (var bi = 0; bi < solved.bands.length; bi++) {
+        var band = solved.bands[bi];
+        if (!band.ok) continue;
+        var colour = C.STYLE.bandColors[bi];
+        var centreV = V.add(FV, V.mul(toV, band.x_focal));
+        var imgW = (metrics && metrics.perBand[bi] && metrics.perBand[bi].slitImageWidth) ? metrics.perBand[bi].slitImageWidth : metrics.wImage_mm;
+        var halfW = Math.max(imgW, R.view.mmPerPx() * 1.5) / 2;
+        var a = V.add(centreV, V.mul(toV, halfW)), b = V.add(centreV, V.mul(toV, -halfW));
+        segV(a, b, { color: colour, alpha: 1 }, 4);
+        segV(V.add(centreV, V.mul(tgV, halfH)), V.add(centreV, V.mul(tgV, -halfH)), { color: colour, alpha: 0.85 }, 2);
+        if (showLabels) text(band.lam_nm.toFixed(1) + ' nm', V.add(F, V.mul(to, band.x_focal)), 6, 14, colour);
+      }
+      if (showLabels) text('探测器面（示意范围 ' + (2 * halfX).toFixed(2) + ' mm）', F, 8, 44, C.STYLE.detectorColor);
+      return { halfX: halfX, halfH: halfH };
+    }
+
+    /** Full frame: projection, then optics, axis, real apertures, rays, detector. */
+    function render(sceneArg, options) {
+      var o = options || {};
+      var scene = (sceneArg && sceneArg.bands && sceneArg.solved) ? sceneArg : (sceneArg && sceneArg.scene) ? sceneArg.scene : sceneArg;
+      var solved = (sceneArg && sceneArg.solved) || (scene && scene.solved);
+      var geometry = (sceneArg && sceneArg.geometry) || (scene && scene.geometry);
+      var metrics = (sceneArg && sceneArg.metrics) || (scene && scene.metrics);
+      var show = Object.assign({ axis: true, apertureEdges: true, labels: true, rays: true, chief: true, aperture: true, edge: true }, (solved && solved.show) || {}, o.show || {});
+      ctx.save();
+      ctx.clearRect(0, 0, R.w, R.h);
+      ctx.fillStyle = C.STYLE.bg; ctx.fillRect(0, 0, R.w, R.h);
+
+      R.counters = { raysDrawn: 0, raysClipped: 0, segments: 0, apertureRaysDrawn: 0, edgeRaysDrawn: 0, chiefRaysDrawn: 0 };
+      R.labelRects = [];
+      R.drawnLabels = [];
+      if (!scene || !scene.bands) {
+        throw new Error('renderer received no traceable scene: keys=' + (sceneArg ? Object.keys(sceneArg).join(',') : String(sceneArg)));
+      }
+      // CR-VIEW-01: derive the projection from the CURRENT incident axis on every frame.
+      R.proj = o.projection || C.makeWorldToView(solved, geometry);
+      var bounds = C.viewBounds(R.proj, solved, geometry, scene, o.extraPoints);
+      R.view = C.makeViewport(bounds, R.w, R.h, o.paddingPx === undefined ? 30 : o.paddingPx);
+
+      if (show.axis) {
+        var axis = geometry.axis;
+        for (var i = 0; i + 1 < axis.length; i++) {
+          segW(axis[i], axis[i + 1], { color: C.STYLE.axisColor, dash: [5, 5] }, 1);
+        }
+      }
+
+      if (show.rays) {
+        for (var bi = 0; bi < scene.bands.length; bi++) {
+          var sb = scene.bands[bi];
+          var colour = C.STYLE.bandColors[bi];
+          if (!sb.ok) continue;
+          if (show.aperture) {
+            for (var k = 0; k < sb.aperture.length; k++) { R.counters.apertureRaysDrawn++; ray(sb.aperture[k], colour, 0.20, 1); }
+          }
+          if (show.edge) {
+            for (var e = 0; e < sb.edges.length; e++) { R.counters.edgeRaysDrawn++; ray(sb.edges[e], colour, 0.30, 1); }
+          }
+          if (show.chief && sb.chief) { R.counters.chiefRaysDrawn++; ray(sb.chief, colour, 0.95, 1.8); }
+        }
+      }
+
+      var colHalf = geometry.apertures.collimatorHalf === null ? solved.D / 2 : geometry.apertures.collimatorHalf;
+      lens(geometry.C, solved.tc, solved.i, colHalf,
+        show.labels ? ('准直镜 f=' + solved.fc + ' mm' + (geometry.apertures.collimatorHalf === null ? '（理想口径）' : ' D' + solved.D_collimator + ' mm')) : null,
+        C.STYLE.lensColor);
+      var camHalf = geometry.apertures.cameraHalf === null ? Math.max(solved.D, geometry.beam.D_out) / 2 : geometry.apertures.cameraHalf;
+      lens(geometry.M, solved.to, solved.W, camHalf,
+        show.labels ? ('成像镜 f=' + solved.fo + ' mm' + (geometry.apertures.cameraHalf === null ? '（理想口径）' : ' D' + solved.D_camera + ' mm')) : null,
+        C.STYLE.lensColor);
+      grating(solved, geometry, show.labels ? ('反射光栅 N=' + solved.N.toFixed(1) + ' l/mm' + (geometry.apertures.gratingHalfWidth === null ? '（理想口径）' : ' · 实物 Wg=' + solved.Wg + ' mm')) : null);
+      var slitHalf = Math.max(solved.w_mm / 2, R.view.mmPerPx() * 0.75);
+      var slitVecV = V.mul(DV(solved.tc), slitHalf);
+      var S0V = WV(geometry.S0);
+      segV(V.add(S0V, slitVecV), V.sub(S0V, slitVecV), { color: C.STYLE.slitColor }, 3);
+      if (show.labels) {
+        text('狭缝 w=' + (solved.w_mm * 1000).toFixed(2) + ' μm（面内）· h=' + solved.h + ' mm 在屏幕外', geometry.S0, 8, -8, C.STYLE.slitColor);
+      }
+      if (show.apertureEdges) apertureEdges(geometry, solved);
+      detector(solved, geometry, metrics, show.labels);
+
+      ctx.restore();
+      var clamped = 0;
+      for (var lr = 0; lr < R.labelRects.length; lr++) if (R.labelRects[lr].clamped) clamped++;
+      return {
+        view: R.view, counters: R.counters, bounds: bounds,
+        projection: R.proj,
+        labelRects: R.labelRects.slice(), labels: R.labelRects.length,
+        clampedLabels: clamped, labelTexts: R.drawnLabels.map(function (l) { return l.text; }),
+      };
+    }
+
+    return {
+      render: render,
+      view: function () { return R.view; },
+      projection: function () { return R.proj; },
+      counters: function () { return R.counters; },
+      stats: R.counters,
+    };
+  }
+
+  C.makeRenderer = makeRenderer;
+  C.canvas = { makeRenderer: makeRenderer };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/ui/inset.js ===== */
+/* Focal-plane inset: the spectral lines exactly as the physics predicts.
+ * Dispersion axis   : x = fo*tan(beta(lambda) - beta0)   [mm]
+ * Spatial axis      : h*fo/fc (ideal, 2D model ignores spatial vignetting) [mm]
+ * Line width        : the slit image width measured by the real trace.
+ * The main canvas never draws the slit height; it lives here. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+
+  function renderInset(ctx, cssW, cssH, solved, metrics, options) {
+    var o = options || {};
+    var dpr = o.dpr || 1;
+    var W = Math.round(cssW * dpr), H = Math.round(cssH * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(15,20,25,0.94)'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#2a3441'; ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+
+    var labelTexts = [];
+    var rawFill = ctx.fillText.bind(ctx);
+    ctx.fillText = function (s) { labelTexts.push(String(s)); return rawFill.apply(null, arguments); };
+    var okBands = [];
+    for (var i = 0; i < solved.bands.length; i++) if (solved.bands[i].ok) okBands.push(i);
+    var font = Math.round(11 * dpr) + 'px "Segoe UI","Microsoft YaHei",system-ui,sans-serif';
+    var small = Math.round(9.5 * dpr) + 'px "Segoe UI","Microsoft YaHei",system-ui,sans-serif';
+
+    if (!okBands.length) {
+      ctx.fillStyle = '#ff6b6b'; ctx.font = font; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('焦面：当前参数无传播级次', 8 * dpr, 8 * dpr);
+      ctx.fillText = rawFill;
+      return { ok: false, reason: 'no propagating band', labelTexts: labelTexts };
+    }
+
+    // horizontal scale from the band x positions (never from a hard-coded factor)
+    var xs = okBands.map(function (i) { return solved.bands[i].x_focal; });
+    var span = Math.max(Math.abs(Math.min.apply(null, xs)), Math.abs(Math.max.apply(null, xs)));
+    var padL = 30 * dpr, padR = 30 * dpr, padT = 20 * dpr, padB = 30 * dpr;
+    var halfX = Math.max(span * 1.45, solved.w_mm * 20, 1e-3);
+    var halfY = Math.max(solved.h * solved.fo / solved.fc / 2, 1e-6);
+    var sx = (W - padL - padR) / (2 * halfX);
+    var sy = (H - padT - padB) / (2 * halfY);
+    var cx = W / 2, cy = padT + (H - padT - padB) / 2;
+
+    // frame + zero-wavelength axis
+    ctx.strokeStyle = 'rgba(159,176,192,0.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(W - padR, padT); ctx.lineTo(W - padR, H - padB); ctx.lineTo(padL, H - padB); ctx.closePath(); ctx.stroke();
+    ctx.strokeStyle = 'rgba(159,176,192,0.25)'; ctx.setLineDash([3 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.moveTo(cx, padT); ctx.lineTo(cx, H - padB); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // spectral lines
+    var drawn = [];
+    for (var k = 0; k < okBands.length; k++) {
+      var bi = okBands[k];
+      var band = solved.bands[bi];
+      var colour = C.STYLE.bandColors[bi];
+      var pb = metrics && metrics.perBand ? metrics.perBand[bi] : null;
+      var imgW = pb && pb.slitImageWidth ? pb.slitImageWidth : metrics.wImage_mm;
+      var wpx = Math.max(imgW * sx, 1.2 * dpr);
+      var lineH = 2 * halfY * sy;
+      var X = cx + band.x_focal * sx;
+      ctx.strokeStyle = colour; ctx.lineWidth = wpx; ctx.globalAlpha = 0.95;
+      ctx.beginPath(); ctx.moveTo(X, cy - lineH / 2); ctx.lineTo(X, cy + lineH / 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      drawn.push({ lam: band.lam_nm, x: band.x_focal, px: X, widthMm: imgW, colour: colour });
+    }
+
+    // labels
+    ctx.font = small; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (var d = 0; d < drawn.length; d++) {
+      ctx.fillStyle = drawn[d].colour;
+      var label = drawn[d].lam.toFixed(1) + ' nm';
+      var lx = Math.min(Math.max(drawn[d].px, 26 * dpr), W - 26 * dpr);
+      ctx.fillText(label, lx, H - padB + 4 * dpr);
+      // reposition the last drawn line's label stack to avoid overlap
+      if (d > 0 && Math.abs(drawn[d].px - drawn[d - 1].px) < 26 * dpr) {
+        ctx.clearRect(lx - 26 * dpr, H - padB + 4 * dpr, 52 * dpr, 12 * dpr);
+        ctx.fillText(label, Math.min(W - 26 * dpr, lx + 24 * dpr), H - padB + 4 * dpr);
+      }
+    }
+
+    // axis arrows/labels
+    ctx.fillStyle = C.STYLE.labelColor; ctx.font = small;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('色散向 x = fo·tan(βλ−β0)  [mm]', 8 * dpr, 5 * dpr);
+    ctx.save();
+    ctx.translate(11 * dpr, H - padB);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'right';
+    ctx.fillText('空间向 h·fo/fc', 0, 0);
+    ctx.restore();
+
+    // scale bar in mm
+    var barMm = 1;
+    var candidates = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20];
+    for (var c = 0; c < candidates.length; c++) if (candidates[c] * sx <= (W - padL - padR) * 0.35) barMm = candidates[c];
+    var barPx = barMm * sx;
+    var bx = W - padR - barPx, by = padT + 6 * dpr;
+    ctx.strokeStyle = C.STYLE.labelColor; ctx.lineWidth = 1.4 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(bx, by); ctx.lineTo(bx + barPx, by);
+    ctx.moveTo(bx, by - 3 * dpr); ctx.lineTo(bx, by + 3 * dpr);
+    ctx.moveTo(bx + barPx, by - 3 * dpr); ctx.lineTo(bx + barPx, by + 3 * dpr);
+    ctx.stroke();
+    ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.fillText(barMm + ' mm', bx + barPx, by - 4 * dpr);
+
+    ctx.fillText = rawFill;
+    return {
+      ok: true,
+      labelTexts: labelTexts,
+      halfXmm: halfX, halfYmm: halfY, pxPerMmX: sx, pxPerMmY: sy,
+      lines: drawn,
+      spatialLengthMm: 2 * halfY,
+      minSeparationMm: drawn.length > 1 ? (function () { var m = Infinity; for (var q = 1; q < drawn.length; q++) m = Math.min(m, Math.abs(drawn[q].x - drawn[q - 1].x)); return m; })() : null,
+    };
+  }
+
+  C.renderInset = renderInset;
+  C.inset = { renderInset: renderInset };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/ui/panels.js ===== */
+/* Panel data builder: turns Solved/Geometry/Metrics into labelled, auditable rows.
+ * Pure data - no DOM access - so the same content can be asserted in browser tests and rendered
+ * by app.js. Every number carries its symbolic formula, its numeric substitution and its unit,
+ * and any non-finite value becomes an explicit error row instead of 'NaN'. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore || (root.SoLExCore = {});
+
+  function finite(v) { return typeof v === 'number' && Number.isFinite(v); }
+
+  /** Significant-digit formatting that never emits NaN/Infinity for a finite input. */
+  function fmt(v, digits) {
+    if (v === null || v === undefined) return '--';
+    if (typeof v !== 'number') return String(v);
+    if (!Number.isFinite(v)) return 'NOT FINITE';
+    var d = digits === undefined ? 6 : digits;
+    var a = Math.abs(v);
+    if (v === 0) return '0';
+    if (a >= 1e6 || a < 1e-4) return v.toExponential(4);
+    return v.toFixed(Math.max(0, d));
+  }
+
+  function row(label, value, unit, formula) {
+    var bad = typeof value === 'number' && !Number.isFinite(value);
+    return { label: label, value: bad ? 'NOT FINITE' : value, unit: unit || '', formula: formula || '', error: bad };
+  }
+
+  function build(result) {
+    var solved = result.solved, geometry = result.geometry, metrics = result.metrics, scene = result.scene;
+    var sections = [];
+    var D = C.CONST;
+
+    /* ---- status ---- */
+    var totalRays = 0, transmitted = 0, clipped = 0, rejected = 0, firstStops = {};
+    var crossNormalBands = [];
+    for (var bi = 0; bi < scene.bands.length; bi++) {
+      var sb = scene.bands[bi];
+      if (!sb.ok) continue;
+      var bandCrossNormal = false;
+      for (var k = 0; k < sb.aperture.length; k++) {
+        var r = sb.aperture[k];
+        totalRays++;
+        if (r.status === C.STATUS.VALID || r.status === C.WARNING_CODES.CROSS_NORMAL) transmitted++;
+        else if (String(r.status).indexOf('CLIPPED') === 0) { clipped++; firstStops[r.firstStop] = (firstStops[r.firstStop] || 0) + 1; }
+        else rejected++;
+        if (r.status === C.WARNING_CODES.CROSS_NORMAL) bandCrossNormal = true;
+      }
+      if (bandCrossNormal || (sb.band && sb.band.crossNormal)) crossNormalBands.push(sb.band.lam_nm);
+    }
+    var crossNormalRow = crossNormalBands.length ? [{
+      label: 'cross-normal branch (beta < 0)',
+      value: crossNormalBands.map(function (nm) { return nm.toFixed(1) + ' nm'; }).join(', '),
+      unit: '',
+      formula: 'warning only: a valid diffracted branch on the other side of the grating normal, outside the default same-side geometry',
+      warning: true,
+    }] : [];
+    sections.push({
+      id: 'status',
+      title: '状态 / status',
+      rows: [
+        row('约束模式', solved.constraint === 'fixedAlpha' ? '研究锁定（固定 α）：需更换光栅' : '固定 N（默认）', '', 'fixedN: N is the physical grating; fixedAlpha: N is back-solved'),
+        row('口径模式', solved.mode === 'real' ? '真实有限口径（默认）' : '理想不限口径（研究用）', '',
+          solved.mode === 'real' ? 'grating Wg=' + solved.Wg + ' mm, lenses D=' + solved.D_collimator + '/' + solved.D_camera + ' mm' : 'no physical aperture: NOT a real-instrument result'),
+        row('设计状态', solved.status, '', ''),
+        row('采样光线', '透射 ' + transmitted + '，裁切 ' + clipped + '，拒绝 ' + rejected + '，共 ' + totalRays, '',
+          'clipped by: ' + (Object.keys(firstStops).length ? JSON.stringify(firstStops) : 'none')),
+      ].concat(crossNormalRow).concat(solved.warnings.map(function (w) {
+        return { label: 'warning', value: w.message, unit: '', formula: w.code, warning: true };
+      })),
+    });
+
+    /* ---- grating and angles ---- */
+    sections.push({
+      id: 'angles',
+      title: '光栅与角度 / grating and angles',
+      rows: [
+        row('入射角 α', fmt(solved.alpha_deg, 6), 'deg',
+          'alpha = G/2 + asin[m*N*lam0/(2cos(G/2))] = ' + fmt(solved.G_deg / 2, 4) + ' + asin(' + fmt(solved.m * solved.N * solved.lam0_mm / (2 * Math.cos(solved.halfG)), 6) + ')'),
+        row('衍射角 β（设计）', fmt(solved.beta_deg, 6), 'deg', 'beta = alpha - G = ' + fmt(solved.alpha_deg, 6) + ' - ' + fmt(solved.G_deg, 4)),
+        row('α − β = G', fmt(solved.alpha_deg - solved.beta_deg, 6), 'deg', 'design constraint'),
+        row('sinα + sinβ', fmt(solved.lawLeft, 9), '-', 'sin(' + fmt(solved.alpha_deg, 6) + ' deg) + sin(' + fmt(solved.beta_deg, 6) + ' deg)'),
+        row('m·N·λ0', fmt(solved.lawRight, 9), '-', solved.m + ' x ' + fmt(solved.N, 6) + ' l/mm x ' + fmt(solved.lam0_mm, 9) + ' mm'),
+        row('光栅方程残差', fmt(solved.lawResidual, 3), '-', 'tolerance 1e-10'),
+        row('传播夹角 i·W', fmt(solved.propagationAngle * D.R2D, 6), 'deg', 'must equal 180 - G = ' + fmt(180 - solved.G_deg, 4)),
+        row('固定 G 设计波长上限', fmt(solved.lambdaDesignMax_nm, 4), 'nm', '(1+cosG)/(mN)'),
+        row('反正弦代数上限', fmt(solved.lambdaAsinMax_nm, 4), 'nm', '2cos(G/2)/(mN): NOT a physical branch limit'),
+        row('固定 α 传播上限', fmt(solved.lambdaOrderMax_nm, 4), 'nm', '(1+sin a)/(mN)'),
+      ],
+    });
+
+    /* ---- dispersion ---- */
+    sections.push({
+      id: 'dispersion',
+      title: '色散 / dispersion',
+      rows: [
+        row('角色散 dβ/dλ', fmt(metrics.dbeta_rad_per_nm, 9), 'rad/nm', 'm*N*1e-6/cos(beta) = ' + solved.m + ' x ' + fmt(solved.N, 1) + ' x 1e-6 / cos(' + fmt(solved.beta_deg, 6) + ' deg)'),
+        row('线色散 dx/dλ', fmt(metrics.dxdl_mm_per_nm, 9), 'mm/nm', 'fo * d beta/d lambda = ' + solved.fo + ' x ' + fmt(metrics.dbeta_rad_per_nm, 9)),
+        row('倒线色散 dλ/dx', fmt(metrics.dldx_nm_per_mm, 9), 'nm/mm', '1/(dx/dlambda)'),
+        row('像素光谱采样', fmt(metrics.sampling_A_per_pixel, 6), 'A/pixel', '10*(p_um/1000)/(dx/dlambda) with p=' + solved.pixel_um + ' um'),
+        row('10 nm 波段间隔', fmt(metrics.dlam_10nm_mm, 6), 'mm', '10 x dx/dlambda'),
+        row('变形因子 A', fmt(solved.anamorphicFactor, 9), 'ratio', 'cos(a)/cos(b): the beam widens by 1/A and the slit image shrinks by A'),
+      ],
+    });
+
+    /* ---- resolution ---- */
+    sections.push({
+      id: 'resolution',
+      title: '分辨力 / resolution (definitions kept separate)',
+      rows: [
+        row('R_slit（几何狭缝）', fmt(metrics.Rslit, 3), '-',
+          '(fc/w)(tan a + sin b/cos a) = (' + solved.fc + '/' + fmt(solved.w_mm, 6) + ')(tan ' + fmt(solved.alpha_deg, 6) + ' + sin ' + fmt(solved.beta_deg, 6) + '/cos ' + fmt(solved.alpha_deg, 6) + ')'),
+        row('狭缝对应波长宽度', fmt(metrics.dSlit_pm, 6), 'pm', 'lam0 / R_slit'),
+        row('R_grating（实际照明）', fmt(metrics.Rgrating_real, 3), '-', 'm*N*W_illuminated = ' + solved.m + ' x ' + fmt(solved.N, 1) + ' x ' + fmt(metrics.W_illuminated_mm, 6) + ' mm'),
+        row('光栅 Rayleigh 波长尺度', fmt(metrics.dGrating_real_pm, 6), 'pm', 'lam0 / R_grating'),
+        row('R_grating（无限口径，对比用）', fmt(metrics.Rgrating_ideal, 3), '-', 'NOT a real instrument figure: shown for comparison only'),
+        row('官方经验 R', metrics.officialR, '-', 'Christian Buil quotes about 40000 for the real instrument under official conditions'),
+        row('每分辨元像素数', fmt(metrics.pixelsPerResolutionElement, 4), 'pixel', 'using the official R above: NOT the Rayleigh width'),
+        { label: 'note', value: 'the two widths above use different definitions and are deliberately NOT root-sum-squared', unit: '', formula: '' },
+      ],
+    });
+
+    /* ---- aperture ---- */
+    sections.push({
+      id: 'aperture',
+      title: '口径与渐晕 / aperture and vignetting',
+      rows: [
+        row('未截取光栅足印', fmt(metrics.footprint_mm, 6), 'mm', 'D/cos(alpha) = ' + solved.D + '/cos(' + fmt(solved.alpha_deg, 6) + ' deg)'),
+        row('有效入射束径 D_eff', fmt(metrics.D_eff_mm, 6), 'mm',
+          'min(D, D_collimator, Wg*cos a) = min(' + solved.D + ', ' + solved.D_collimator + ', ' + fmt(solved.Wg * Math.cos(solved.alpha), 6) + ')'),
+        row('实际照亮光栅宽度', fmt(metrics.W_illuminated_mm, 6), 'mm', 'D_eff/cos(alpha)'),
+        row('衍射后束径 D_out', fmt(metrics.D_out_mm, 6), 'mm', 'D_eff/A (on-axis approximation, not a per-ray clipping rule)'),
+        row('有效 f/#（色散面）', fmt(metrics.fNumberEffective, 6), 'f/#', 'fc/D_eff = ' + solved.fc + '/' + fmt(metrics.D_eff_mm, 6)),
+        row('是否被实物光栅宽度截断', metrics.truncated ? 'yes: vignetting is real' : 'no', '', 'compares the uncropped footprint with Wg'),
+      ].concat(metrics.perBand.map(function (pb) {
+        return row(fmt(pb.lam_nm, 1) + ' nm 相机镜足印',
+          pb.cameraFootprint === null ? '--' : fmt(pb.cameraFootprint, 6), 'mm',
+          '2*max|eta| from the real trace; transmitted ' + pb.transmitted + '/' + pb.sampled + ', clipped ' + pb.clipped);
+      })),
+    });
+
+    /* ---- focal plane ---- */
+    var bandRows = [];
+    for (var b = 0; b < solved.bands.length; b++) {
+      var band = solved.bands[b];
+      if (!band.ok) {
+        bandRows.push({ label: 'band ' + fmt(band.lam_nm, 1) + ' nm', value: 'no propagating order: ' + band.errors[0].code, unit: '', formula: band.errors[0].message, error: true });
+        continue;
+      }
+      bandRows.push(row('波段 ' + fmt(band.lam_nm, 1) + ' nm',
+        'beta ' + fmt(band.beta_deg, 6) + ' deg, x ' + fmt(band.x_focal, 6) + ' mm', '',
+        'beta = asin(m*N*lam - sin a); x = fo*tan(beta - beta0) = ' + solved.fo + '*tan(' + fmt(band.beta_deg, 6) + ' - ' + fmt(solved.beta_deg, 6) + ')'));
+    }
+    sections.push({
+      id: 'focal',
+      title: '探测器与焦面 / detector and focal plane',
+      rows: bandRows.concat([
+        row('狭缝像宽', fmt(metrics.wImage_um, 6), 'um',
+          'w*(fo/fc)/A = ' + fmt(solved.w_mm * 1000, 3) + ' um x ' + fmt(solved.fo / solved.fc, 6) + ' / ' + fmt(solved.anamorphicFactor, 9)),
+        row('空间向谱线长度（理想）', fmt(metrics.hImage_mm, 6), 'mm', 'h*fo/fc = ' + solved.h + ' x ' + solved.fo + '/' + solved.fc + ' (2D model ignores spatial vignetting)'),
+        row('三波段跨度', fmt(metrics.span_mm, 6), 'mm', 'x(lam0+dlam) - x(lam0-dlam)'),
+      ]),
+    });
+
+    /* ---- geometry ---- */
+    sections.push({
+      id: 'geometry',
+      title: '机构坐标 / mechanism coordinates (mm)',
+      rows: [
+        row('C 准直镜中心', '(' + fmt(geometry.C.x, 4) + ', ' + fmt(geometry.C.y, 4) + ')', 'mm', 'C = P - Lc*i, Lc = ' + solved.Lc + ' (example layout, not an official measurement)'),
+        row('S0 狭缝中心', '(' + fmt(geometry.S0.x, 4) + ', ' + fmt(geometry.S0.y, 4) + ')', 'mm', 'S0 = C - fc*i = ' + solved.fc + ' mm in front of the collimator'),
+        row('P 光栅中心', '(0, 0)', 'mm', 'grating surface is fixed at x = 0'),
+        row('M 成像镜中心', '(' + fmt(geometry.M.x, 4) + ', ' + fmt(geometry.M.y, 4) + ')', 'mm', 'M = P + Lo*W, Lo = ' + solved.Lo + ' (example layout)'),
+        row('F 探测器中心', '(' + fmt(geometry.F.x, 4) + ', ' + fmt(geometry.F.y, 4) + ')', 'mm', 'F = M + fo*W'),
+      ],
+    });
+
+    return { sections: sections, status: solved.status, warnings: solved.warnings };
+  }
+
+  C.panels = { build: build, fmt: fmt, finite: finite };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ===== src/ui/app.js ===== */
+/* UI wiring: controls -> one solved snapshot -> canvas + panels. No physics in this file. */
+(function (root) {
+  'use strict';
+  var C = root.SoLExCore;
+  var doc = root.document;
+
+  if (!C) return;
+
+  var app = { ui: null, last: null, lastError: null, renderMs: 0 };
+
+  /* ---- panel detail mode: 'summary' shows key results only, 'detail' adds formulas ---- */
+  var NARROW_PX = 1100;          // below this the panel starts collapsed
+  var mode = { value: 'detail', userChosen: false };
+  C.app = app;
+
+  var CONTROLS = [
+    { id: 'fc', key: 'fc', label: '准直镜焦距 fc', unit: 'mm', min: 20, max: 300, step: 1 },
+    { id: 'fo', key: 'fo', label: '成像镜焦距 fo', unit: 'mm', min: 20, max: 400, step: 1 },
+    { id: 'D', key: 'D', label: '入射准直光束直径 D', unit: 'mm', min: 1, max: 40, step: 0.5 },
+    { id: 'N', key: 'N', label: '光栅刻线密度 N', unit: 'l/mm', min: 100, max: 3600, step: 1 },
+    { id: 'G', key: 'G_deg', label: '中心波长两臂夹角 G', unit: 'deg', min: 5, max: 60, step: 0.1 },
+    { id: 'w', key: 'w_um', label: '狭缝宽度 w', unit: 'μm', min: 0.5, max: 200, step: 0.5 },
+    { id: 'l0', key: 'lam0_nm', label: '设计中心波长 λ0', unit: 'nm', min: 200, max: 1100, step: 0.1 },
+    { id: 'dl', key: 'dlam_nm', label: '波段半间隔 Δλ', unit: 'nm', min: 0, max: 40, step: 0.5 },
+    { id: 'nr', key: 'nRay', label: '每波段光线数（奇数）', unit: '根', min: 1, max: 51, step: 2 },
+    { id: 'lc', key: 'Lc', label: '准直镜—光栅距离 Lc', unit: 'mm', min: 1, max: 400, step: 1 },
+    { id: 'lo', key: 'Lo', label: '光栅—成像镜距离 Lo', unit: 'mm', min: 1, max: 400, step: 1 },
+  ];
+
+  function $(id) { return doc.getElementById(id); }
+
+  function viewportWidth() {
+    if (typeof root.innerWidth === 'number' && root.innerWidth > 0) return root.innerWidth;
+    var side = $('side');
+    if (side && side.getBoundingClientRect) {
+      var r = side.getBoundingClientRect();
+      if (r && typeof r.width === 'number' && r.width > 0) return r.width * 2.6; // rough fallback
+    }
+    return 1400;
+  }
+
+  function applyMode(next, byUser) {
+    mode.value = next;
+    if (byUser) mode.userChosen = true;
+    var side = $('side');
+    if (side && side.setAttribute) side.setAttribute('data-mode', next);
+    var sum = $('modeSummary'), det = $('modeDetail');
+    if (sum && sum.classList) { if (next === 'summary') sum.classList.add('on'); else sum.classList.remove('on'); }
+    if (det && det.classList) { if (next === 'detail') det.classList.add('on'); else det.classList.remove('on'); }
+    var chip = $('modeChip');
+    if (chip) chip.textContent = next === 'summary' ? '仅关键指标（公式已折叠）' : '完整公式与代入';
+    return mode.value;
+  }
+
+  /** Auto behaviour: collapsed on a narrow window, expanded when there is room. */
+  function autoMode() {
+    if (mode.userChosen) return mode.value;
+    return viewportWidth() < NARROW_PX ? 'summary' : 'detail';
+  }
+
+  function readUI() {
+    var ui = {};
+    for (var i = 0; i < CONTROLS.length; i++) {
+      var c = CONTROLS[i];
+      var el = $('n_' + c.id);
+      ui[c.key] = el ? el.value : C.DEFAULT_INPUT[c.key];
+    }
+    ui.mode = $('modeReal') && $('modeReal').checked ? 'real' : 'ideal';
+    ui.constraint = $('constraintFixedN') && $('constraintFixedN').checked ? 'fixedN' : 'fixedAlpha';
+    ui.show = {
+      chief: !$('showChief') || $('showChief').checked,
+      aperture: !$('showAperture') || $('showAperture').checked,
+      edge: !$('showEdge') || $('showEdge').checked,
+      axis: !$('showAxis') || $('showAxis').checked,
+      labels: !$('showLabels') || $('showLabels').checked,
+    };
+    ui.N = ui.N === null ? C.DEFAULT_INPUT.N : ui.N;
+    if ($('alphaRef')) {
+      var ar = Number($('alphaRef').value);
+      if (Number.isFinite(ar) && ar > 0) ui.alphaRef_deg = ar;
+    }
+    return ui;
+  }
+
+  function syncControls(input) {
+    for (var i = 0; i < CONTROLS.length; i++) {
+      var c = CONTROLS[i];
+      var n = $('n_' + c.id), r = $('r_' + c.id);
+      if (!n) continue;
+      var v = input[c.key];
+      if (v === null || v === undefined) continue;
+      var shown = c.key === 'nRay' ? String(Math.round(v)) : String(Number(v));
+      n.value = shown;
+      if (r) r.value = String(v);
+      var out = $('v_' + c.id);
+      if (out) out.textContent = shown + (c.unit ? ' ' + c.unit : '');
+    }
+    var ne = $('n_N');
+    if (ne && input.constraint === 'fixedN') { ne.disabled = false; }
+    else if (ne) { ne.disabled = true; }
+  }
+
+  function renderPanels(model) {
+    var host = $('panels');
+    if (!host) return;
+    var html = ['<div class="state">state: <b>' + model.status + '</b></div>'];
+    for (var s = 0; s < model.sections.length; s++) {
+      var sec = model.sections[s];
+      html.push('<h2>' + sec.title + '</h2><table>');
+      for (var r = 0; r < sec.rows.length; r++) {
+        var row = sec.rows[r];
+        var cls = row.error ? ' class="err"' : (row.warning ? ' class="warn"' : '');
+        html.push('<tr' + cls + '><td class="k">' + row.label + '</td><td class="v">' + row.value +
+          (row.unit ? ' <span class="u">' + row.unit + '</span>' : '') + '</td></tr>');
+        if (row.formula) html.push('<tr><td colspan="2" class="f">' + row.formula + '</td></tr>');
+      }
+      html.push('</table>');
+    }
+    host.innerHTML = html.join('');
+  }
+  function renderError(errors) {
+    var host = $('panels');
+    if (!host) return;
+    var html = ['<div class="state error">input rejected - no optical path is drawn</div>', '<h2>input problems</h2><table>'];
+    for (var i = 0; i < errors.length; i++) {
+      html.push('<tr class="err"><td class="k">' + (errors[i].field || '') + '</td><td class="v">' + errors[i].message + '</td></tr>');
+    }
+    html.push('</table>');
+    host.innerHTML = html.join('');
+  }
+  function renderStatusError(status, errors) {
+    var host = $('panels');
+    if (!host) return;
+    var html = ['<div class="state error">no physical solution: <b>' + status + '</b></div>', '<table>'];
+    for (var i = 0; i < (errors || []).length; i++) {
+      html.push('<tr class="err"><td class="k">' + (errors[i].code || '') + '</td><td class="v">' + errors[i].message + '</td></tr>');
+    }
+    html.push('</table>');
+    host.innerHTML = html.join('');
+  }
+
+  function resize(canvas) {
+    var dpr = Math.min(2, root.devicePixelRatio || 1);
+    var host = canvas.parentElement;
+    var rect = host.getBoundingClientRect();
+    var w = Math.max(320, Math.round((rect.width || 800)));
+    var h = Math.max(240, Math.round((rect.height || 600)));
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    return { w: canvas.width, h: canvas.height, dpr: dpr, cssW: w, cssH: h };
+  }
+
+  /** Focal-plane inset canvas, created once inside #stage (bottom-right corner). */
+  function ensureInsetCanvas() {
+    var ic = $('inset');
+    if (ic) return ic;
+    var stage = $('stage');
+    if (!stage || !stage.appendChild) return null;
+    ic = doc.createElement('canvas');
+    ic.id = 'inset';
+    ic.style.cssText = 'position:absolute;right:10px;bottom:10px;width:330px;height:190px;' +
+      'border-radius:7px;pointer-events:none';
+    stage.appendChild(ic);
+    return ic;
+  }
+
+  function drawInset(result) {
+    var ic = ensureInsetCanvas();
+    if (!ic || !ic.getContext) return null;
+    var dpr = Math.min(2, root.devicePixelRatio || 1);
+    var cssW = 330, cssH = 190;
+    ic.width = Math.round(cssW * dpr);
+    ic.height = Math.round(cssH * dpr);
+    if (ic.style) { ic.style.width = cssW + 'px'; ic.style.height = cssH + 'px'; }
+    var info = C.renderInset(ic.getContext('2d'), cssW, cssH, result.solved, result.metrics, { dpr: dpr });
+    app.lastInset = info;
+    return info;
+  }
+
+  function draw(result) {
+    var canvas = $('cv');
+    if (!canvas || !canvas.getContext) return null;
+    var size = resize(canvas);
+    var ctx = canvas.getContext('2d');
+    var renderer = C.makeRenderer(ctx, size.w, size.h);
+    var info = renderer.render(result, { paddingPx: Math.round(26 * size.dpr), show: result.input.show });
+    info.size = size;
+    app.lastRender = info;
+    app.last = result;
+    drawInset(result);
+    updateOverlay(result);
+    return info;
+  }
+
+  function refresh() {
+    var t0 = (root.performance && root.performance.now) ? root.performance.now() : Date.now();
+    var raw = readUI();
+    var validated = C.parseAndValidateInput(raw);
+    if (!validated.ok) {
+      app.lastError = { stage: 'input', errors: validated.errors };
+      app.last = null;
+      renderError(validated.errors);
+      clearCanvas();
+      return app.lastError;
+    }
+    var design = C.solveDesign(validated.input);
+    if (!design.ok) {
+      app.lastError = { stage: 'design', status: design.status, errors: design.errors };
+      app.last = null;
+      renderStatusError(design.status, design.errors);
+      clearCanvas();
+      return app.lastError;
+    }
+    var solved = design.solved;
+    var geometry = C.buildGeometry(solved);
+    var scene = C.traceScene(solved, geometry);
+    var metrics = C.computeMetrics(solved, geometry, scene);
+    var result = { ok: true, input: validated.input, solved: solved, geometry: geometry, scene: scene, metrics: metrics, status: solved.status };
+    app.last = result;
+    app.lastError = null;
+    syncControls(validated.input);
+    var panelModel = C.panels.build(result);
+    renderPanels(panelModel);
+    var panelRays = { transmitted: 0, clipped: 0, rejected: 0 };
+    for (var bi2 = 0; bi2 < scene.bands.length; bi2++) {
+      var sb2 = scene.bands[bi2];
+      if (!sb2.ok) continue;
+      for (var k2 = 0; k2 < sb2.aperture.length; k2++) {
+        var st2 = sb2.aperture[k2].status;
+        if (st2 === C.STATUS.VALID || st2 === C.WARNING_CODES.CROSS_NORMAL) panelRays.transmitted++;
+        else if (String(st2).indexOf('CLIPPED') === 0) panelRays.clipped++;
+        else panelRays.rejected++;
+      }
+    }
+    draw(result);
+    app.renderMs = ((root.performance && root.performance.now) ? root.performance.now() : Date.now()) - t0;
+    updateOverlay(result);
+    return result;
+  }
+
+  /** Status line above the canvas; always derived from the same solved snapshot as the drawing. */
+  function updateOverlay(result) {
+    var ov = $('overlay');
+    if (!ov || !result || !result.solved) return;
+    var solved = result.solved, metrics = result.metrics;
+    var counts = { transmitted: 0, clipped: 0, rejected: 0 };
+    for (var bi = 0; bi < result.scene.bands.length; bi++) {
+      var sb = result.scene.bands[bi];
+      if (!sb.ok) continue;
+      for (var k = 0; k < sb.aperture.length; k++) {
+        var st = sb.aperture[k].status;
+        if (st === C.STATUS.VALID || st === C.WARNING_CODES.CROSS_NORMAL) counts.transmitted++;
+        else if (String(st).indexOf('CLIPPED') === 0) counts.clipped++;
+        else counts.rejected++;
+      }
+    }
+    var modeText = (solved.constraint === 'fixedAlpha' ? '固定 α（研究）' : '固定 N') + ' / ' +
+      (solved.mode === 'real' ? '真实口径' : '理想口径');
+    ov.textContent =
+      'λ0 = ' + solved.lam0_nm.toFixed(1) + ' nm   α = ' + solved.alpha_deg.toFixed(4) + '°   β = ' + solved.beta_deg.toFixed(4) + '°\n' +
+      'N = ' + solved.N.toFixed(3) + ' l/mm   G = ' + solved.G_deg.toFixed(2) + '°   m = ' + solved.m + '   ' + modeText + '\n' +
+      'D = ' + solved.D.toFixed(2) + ' mm   D_eff = ' + metrics.D_eff_mm.toFixed(4) + ' mm   R_slit = ' + metrics.Rslit.toFixed(0) +
+      '   R_grating(实物照射) = ' + metrics.Rgrating_real.toFixed(0) + '\n' +
+      '透射 ' + counts.transmitted + ' / 裁切 ' + counts.clipped + ' / 拒绝 ' + counts.rejected;
+  }
+
+  function clearCanvas() {
+    var ic = $('inset');
+    if (ic && ic.getContext) {
+      var ictx = ic.getContext('2d');
+      ictx.setTransform(1, 0, 0, 1, 0, 0);
+      ictx.clearRect(0, 0, ic.width, ic.height);
+    }
+    app.lastInset = null;
+    // No stale numbers may survive a rejected design (BUG-08 class of defect).
+    var ov = $('overlay');
+    if (ov) ov.textContent = '';
+    var canvas = $('cv');
+    if (!canvas || !canvas.getContext) return;
+    var size = resize(canvas);
+    var ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = C.STYLE.bg; ctx.fillRect(0, 0, size.w, size.h);
+    ctx.fillStyle = C.STYLE.clippedColor;
+    ctx.font = (14 * size.dpr) + 'px system-ui, sans-serif';
+    ctx.fillText('当前参数无物理可行光路 / no physical optical path for the current input', 24 * size.dpr, 40 * size.dpr);
+    // Publish a cleared render state so the "nothing is drawn" claim is checkable.
+    app.lastRender = {
+      view: app.lastRender ? app.lastRender.view : null,
+      counters: { raysDrawn: 0, raysClipped: 0, segments: 0, apertureRaysDrawn: 0, edgeRaysDrawn: 0, chiefRaysDrawn: 0 },
+      labelRects: [], labels: 0, size: size, cleared: true,
+    };
+  }
+
+  function bind() {
+    for (var i = 0; i < CONTROLS.length; i++) {
+      (function (c) {
+        var n = $('n_' + c.id), r = $('r_' + c.id);
+        var commit = function (value) {
+          if (n) n.value = String(value);
+          if (r) r.value = String(value);
+          var out = $('v_' + c.id);
+          if (out) out.textContent = String(value) + (c.unit ? ' ' + c.unit : '');
+          // Hand-editing N is an explicit statement about the grating: leave the research lock
+          // and go back to fixed N (SPEC v3 section 3), keeping the radio and the boxes in sync.
+          if (c.key === 'N' && $('constraintFixedN') && !$('constraintFixedN').checked) {
+            $('constraintFixedN').checked = true;
+            if ($('constraintFixedAlpha')) $('constraintFixedAlpha').checked = false;
+          }
+          refresh();
+        };
+        if (r) r.addEventListener('input', function (e) { commit(e.target.value); });
+        if (n) {
+          n.addEventListener('change', function (e) { commit(e.target.value); });
+          n.addEventListener('keydown', function (e) { if (e.key === 'Enter') commit(n.value); });
+        }
+      })(CONTROLS[i]);
+    }
+    var radios = ['modeReal', 'modeIdeal', 'constraintFixedN', 'constraintFixedAlpha'];
+    for (var k = 0; k < radios.length; k++) {
+      var el = $(radios[k]);
+      if (el) el.addEventListener('change', function () { refresh(); });
+    }
+    var showBoxes = ['showChief', 'showAperture', 'showEdge', 'showLabels', 'showAxis'];
+    for (var s = 0; s < showBoxes.length; s++) {
+      var box = $(showBoxes[s]);
+      if (box) box.addEventListener('change', function () { refresh(); });
+    }
+    var ar = $('alphaRef');
+    if (ar) ar.addEventListener('change', function () { refresh(); });
+    // Panel detail switch: "key results" vs "formulas and derivations".
+    var sumBtn = $('modeSummary'), detBtn = $('modeDetail');
+    if (sumBtn) sumBtn.addEventListener('click', function () { applyMode('summary', true); });
+    if (detBtn) detBtn.addEventListener('click', function () { applyMode('detail', true); });
+    root.addEventListener('resize', function () {
+      // Auto-follow the window size only while the user has not chosen a mode.
+      applyMode(autoMode(), false);
+      if (app.last) draw(app.last);
+    });
+  }
+
+  function buildControlDom() {
+    var host = $('controls');
+    if (!host) return;
+    var html = [];
+    for (var i = 0; i < CONTROLS.length; i++) {
+      var c = CONTROLS[i];
+      html.push('<div class="ctl">');
+      html.push('<div class="row"><label for="n_' + c.id + '">' + c.label + '</label>');
+      html.push('<span><input type="number" id="n_' + c.id + '" step="' + c.step + '" min="' + c.min + '" max="' + c.max + '">');
+      if (c.unit) html.push('<span class="unit">' + c.unit + '</span>');
+      html.push('</span></div>');
+      html.push('<input type="range" id="r_' + c.id + '" min="' + c.min + '" max="' + c.max + '" step="' + c.step + '">');
+      html.push('<span class="unit" id="v_' + c.id + '"></span>');
+      html.push('</div>');
+    }
+    host.innerHTML = html.join('');
+  }
+
+  /** Write the default input into the freshly created controls so readUI() has real values. */
+  function populateDefaults() {
+    for (var i = 0; i < CONTROLS.length; i++) {
+      var c = CONTROLS[i];
+      var v = C.DEFAULT_INPUT[c.key];
+      if (v === null || v === undefined) continue;
+      var n = $('n_' + c.id), r = $('r_' + c.id), out = $('v_' + c.id);
+      if (n) n.value = String(v);
+      if (r) r.value = String(v);
+      if (out) out.textContent = String(v) + (c.unit ? ' ' + c.unit : '');
+    }
+    if ($('modeReal')) $('modeReal').checked = C.DEFAULT_INPUT.mode === 'real';
+    if ($('modeIdeal')) $('modeIdeal').checked = C.DEFAULT_INPUT.mode === 'ideal';
+    if ($('constraintFixedN')) $('constraintFixedN').checked = C.DEFAULT_INPUT.constraint === 'fixedN';
+    if ($('constraintFixedAlpha')) $('constraintFixedAlpha').checked = C.DEFAULT_INPUT.constraint === 'fixedAlpha';
+  }
+
+  function init() {
+    buildControlDom();
+    populateDefaults();
+    applyMode(autoMode(), false);   // narrow window -> key results; roomy -> full formulas
+    bind();
+    refresh();
+    return app;
+  }
+
+  app.init = init;
+  app.refresh = refresh;
+  app.draw = draw;
+  app.drawInset = drawInset;
+  app.updateOverlay = updateOverlay;
+  app.applyMode = applyMode;
+  app.panelMode = function () { return mode.value; };
+  app.modeIsUserChosen = function () { return mode.userChosen; };
+  app.autoMode = autoMode;
+  app.readUI = readUI;
+  app.CONTROLS = CONTROLS;
+
+  if (doc && doc.readyState !== 'loading') init();
+  else if (doc) doc.addEventListener('DOMContentLoaded', init);
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+</script>
+</body>
+</html>
